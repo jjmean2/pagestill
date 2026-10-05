@@ -176,7 +176,7 @@ withConnection(program.command("open"))
   });
 
 withConnection(program.command("run"))
-  .description("capture every page listed in a job file (see README: Batch capture)")
+  .description("capture every page listed in a job file (see README: Many pages at once)")
   .argument("<job>", "job YAML file")
   .option("--resume <runDir>", "continue a previous run; pages already captured are skipped")
   .option("-c, --concurrency <n>", "pages captured in parallel, each in its own window")
