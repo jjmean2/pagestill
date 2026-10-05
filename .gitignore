@@ -3,3 +3,4 @@ dist/
 pagestill-out/
 *.log
 .DS_Store
+*.tgz
