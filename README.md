@@ -152,6 +152,8 @@ pnpm install
 pnpm dev            # run from source (tsx)
 pnpm test           # unit + e2e (e2e launches a throwaway Chrome)
 pnpm build          # dist/cli.js
+pnpm add -g "link:$PWD"   # put this checkout's `pagestill` on PATH (rebuilds apply instantly)
+pnpm remove -g pagestill  # undo
 ```
 
 ## License
