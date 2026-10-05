@@ -1,6 +1,6 @@
 {
   "name": "pagestill",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Capture the page you're looking at — PNG screenshots and single-file HTML snapshots from your live Chrome session.",
   "license": "AGPL-3.0-or-later",
   "author": "Jongwan Lee <jjmean2@gmail.com>",
