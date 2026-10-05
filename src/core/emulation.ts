@@ -8,6 +8,9 @@ export function emulationKey(s: EmulationSettings): string {
   return JSON.stringify([s.viewport, s.dpr, s.theme, s.reducedMotion]);
 }
 
+/** Key of the page's natural state (no overrides). */
+export const PASSTHROUGH_KEY = emulationKey({ viewport: "as-is", dpr: "as-is", theme: "as-is", reducedMotion: false });
+
 export function isPassthrough(s: EmulationSettings): boolean {
   return s.viewport === "as-is" && s.dpr === "as-is" && s.theme === "as-is" && !s.reducedMotion;
 }
