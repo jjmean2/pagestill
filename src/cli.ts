@@ -174,6 +174,37 @@ withConnection(program.command("open"))
     await session.disconnect();
   });
 
+withConnection(program.command("run"))
+  .description("capture every page listed in a job file (see README: Batch capture)")
+  .argument("<job>", "job YAML file")
+  .option("--resume <runDir>", "continue a previous run; pages already captured are skipped")
+  .option("-c, --concurrency <n>", "pages captured in parallel, each in its own window")
+  .option("-o, --out <dir>", "output root (a run folder is created inside)")
+  .action(async (jobPath: string, flags: ConnectionFlags & { resume?: string; concurrency?: string; out?: string }) => {
+    const { loadJob } = await import("./batch/job.js");
+    const { runJob } = await import("./batch/runner.js");
+    const { reportRun, askLogin } = await import("./batch/console.js");
+    const job = loadJob(jobPath);
+    if (flags.out) job.out = flags.out;
+    const config = loadConfig();
+    const session = await connect(flags, job.settings?.htmlOptions?.archiver ?? "singlefile");
+    try {
+      const { manifest } = await runJob({
+        session,
+        job,
+        jobPath,
+        config,
+        runDir: flags.resume,
+        concurrency: flags.concurrency ? Number(flags.concurrency) : undefined,
+        onEvent: reportRun,
+        onLogin: askLogin,
+      });
+      if (Object.values(manifest.entries).some((e) => e.status !== "ok")) process.exitCode = 2;
+    } finally {
+      await session.disconnect();
+    }
+  });
+
 function pickTab(session: BrowserSession, query?: string) {
   if (!query) return session.active;
   const tabs = session.listTabs();

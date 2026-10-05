@@ -1,38 +1,25 @@
-import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { join } from "node:path";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { capture } from "../src/core/capture.js";
 import { findChrome } from "../src/core/chrome.js";
 import { BrowserSession } from "../src/core/session.js";
 import { DEFAULT_SETTINGS, mergeSettings } from "../src/core/settings.js";
+import { type TestSite, startSite } from "./site.js";
 
-const FIXTURES = join(import.meta.dirname, "fixtures");
-const TYPES: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".svg": "image/svg+xml" };
 const chrome = findChrome();
 
 describe.skipIf(!chrome)("capture against a real Chrome", () => {
-  let server: Server;
+  let site: TestSite;
   let session: BrowserSession;
   let base: string;
   const tmp = mkdtempSync(join(tmpdir(), "pagestill-e2e-"));
 
   beforeAll(async () => {
-    server = createServer(async (req, res) => {
-      const path = join(FIXTURES, (req.url ?? "/").split("?")[0] === "/" ? "index.html" : req.url!.slice(1));
-      try {
-        const body = await readFile(path);
-        res.writeHead(200, { "content-type": TYPES[extname(path)] ?? "application/octet-stream" }).end(body);
-      } catch {
-        res.writeHead(404).end();
-      }
-    });
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    const port = (server.address() as { port: number }).port;
-    base = `http://localhost:${port}/`;
+    site = await startSite();
+    base = site.base;
     session = await BrowserSession.connect({ port: 9000 + Math.floor(Math.random() * 900), profileDir: join(tmp, "profile") });
     const page = (await session.browser.pages())[0]!;
     await page.goto(base, { waitUntil: "networkidle0" });
@@ -42,7 +29,7 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
 
   afterAll(async () => {
     await session?.browser.close().catch(() => {});
-    server?.close();
+    site?.close();
   });
 
   it("archives the current DOM state into one self-contained HTML file", async () => {
