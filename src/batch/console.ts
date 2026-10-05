@@ -5,12 +5,17 @@ import type { LoginDecision, RunEvent } from "./runner.js";
 const isTTY = !!process.stdin.isTTY && !!process.stderr.isTTY;
 const c = (code: number, s: string) => (process.stderr.isTTY ? `\x1b[${code}m${s}\x1b[0m` : s);
 const out = (s: string) => process.stderr.write(`${s}\n`);
+/** Relative to cwd when inside it, absolute otherwise. */
+const show = (p: string) => {
+  const r = relative(process.cwd(), p);
+  return !r || r.startsWith("..") ? p : r;
+};
 
 /** Line-based progress for `pagestill run` (stderr, so stdout stays clean for scripts). */
 export function reportRun(e: RunEvent): void {
   switch (e.type) {
     case "start":
-      out(`${c(1, "pagestill run")} → ${relative(process.cwd(), e.runDir) || e.runDir}`);
+      out(`${c(1, "pagestill run")} → ${show(e.runDir)}`);
       out(`${e.total} captures${e.alreadyDone ? `, ${e.alreadyDone} already done (resume)` : ""}`);
       break;
     case "task":
@@ -32,8 +37,8 @@ export function reportRun(e: RunEvent): void {
       out(
         `${e.aborted ? c(33, "Aborted") : c(1, "Done")}: ${c(32, `${e.ok} ok`)}, ${e.failed ? c(31, `${e.failed} failed`) : "0 failed"}, ${e.skipped} skipped`,
       );
-      out(`Gallery: ${relative(process.cwd(), `${e.runDir}/index.html`)}`);
-      if (e.failed || e.skipped) out(c(2, `Retry the rest with: --resume ${relative(process.cwd(), e.runDir) || e.runDir}`));
+      out(`Gallery: ${show(`${e.runDir}/index.html`)}`);
+      if (e.failed || e.skipped) out(c(2, `Retry the rest with: --resume ${show(e.runDir)}`));
       break;
   }
 }

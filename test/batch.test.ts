@@ -62,6 +62,8 @@ describe.skipIf(!findChrome())("batch run against a real Chrome", () => {
     expect(mobile.files.find((f) => f.kind === "image")).toMatchObject({ width: 390, height: 844 });
     expect(m.entries["index/800x600"]!.files.map((f) => f.path).sort()).toEqual(["index/800x600.html", "index/800x600.png"]);
     expect(readFileSync(join(runDir, "private/800x600.html"), "utf8")).toContain("secret dashboard");
+    expect(mobile.thumb).toBe(".thumbs/bee--390x844m.jpg");
+    expect(readFileSync(join(runDir, "index.html"), "utf8")).toContain('src=".thumbs/bee--390x844m.jpg"');
     expect(site.hits.get("/site/users/1")).toBeUndefined();
   }, 120_000);
 

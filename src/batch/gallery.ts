@@ -1,9 +1,27 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import sharp from "sharp";
 import type { Manifest, ManifestEntry } from "./runner.js";
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const href = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
+const THUMB_WIDTH = 480;
+const THUMB_MAX_HEIGHT = 640;
+
+/** Small JPEG of the top of a capture; full-page PNGs can be tens of megapixels. */
+export async function writeThumbnail(imagePath: string, thumbPath: string): Promise<void> {
+  mkdirSync(dirname(thumbPath), { recursive: true });
+  const img = sharp(imagePath, { limitInputPixels: false });
+  const meta = await img.metadata();
+  const height = Math.round(((meta.height ?? 1) * THUMB_WIDTH) / (meta.width ?? THUMB_WIDTH));
+  await img
+    .resize({ width: THUMB_WIDTH })
+    .extract({ left: 0, top: 0, width: THUMB_WIDTH, height: Math.max(1, Math.min(THUMB_MAX_HEIGHT, height)) })
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 75 })
+    .toFile(thumbPath);
+}
 
 /** Static index.html next to the captures: one row per page, one card per variant. */
 export function writeGallery(runDir: string, m: Manifest): void {
@@ -24,7 +42,7 @@ export function writeGallery(runDir: string, m: Manifest): void {
         const img = e.files.find((f) => f.kind === "image");
         const html = e.files.find((f) => f.kind === "html");
         const thumb = img
-          ? `<a class="thumb" href="${href(img.path)}"><img loading="lazy" src="${href(img.path)}" alt=""></a>`
+          ? `<a class="thumb" href="${href(img.path)}"><img loading="lazy" src="${href(e.thumb ?? img.path)}" alt=""></a>`
           : `<div class="thumb empty">${e.status === "ok" ? "HTML only" : esc(e.error ?? e.status)}</div>`;
         const links = [
           img && `<a href="${href(img.path)}">image${img.width ? ` ${img.width}×${img.height}` : ""}</a>`,

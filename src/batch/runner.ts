@@ -9,7 +9,7 @@ import { gotoAndWait, runActions } from "../core/navigate.js";
 import type { BrowserSession } from "../core/session.js";
 import { type CaptureSettings, DEFAULT_SETTINGS, mergeSettings } from "../core/settings.js";
 import { isLoginRedirect } from "../core/urls.js";
-import { writeGallery } from "./gallery.js";
+import { writeGallery, writeThumbnail } from "./gallery.js";
 import { type Job, type ResolvedPage, type Variant, resolvePages, variants } from "./job.js";
 
 export type EntryStatus = "ok" | "failed" | "skipped";
@@ -26,6 +26,8 @@ export interface ManifestEntry {
   files: { kind: "image" | "html"; path: string; bytes: number; width?: number; height?: number }[];
   warnings: string[];
   error?: string;
+  /** Gallery thumbnail, relative to the run folder. */
+  thumb?: string;
   durationMs: number;
   at: string;
 }
@@ -196,6 +198,13 @@ export async function runJob(opts: RunOptions): Promise<{ runDir: string; manife
               entry.title = res.title;
               entry.warnings = [...opened.warnings, ...res.warnings];
               entry.files = res.files.map((f) => ({ ...f, path: relative(runDir, f.path) }));
+              const image = res.files.find((f) => f.kind === "image");
+              if (image) {
+                const thumb = join(".thumbs", `${p.name}--${v.id}.jpg`);
+                await writeThumbnail(image.path, join(runDir, thumb))
+                  .then(() => (entry.thumb = thumb))
+                  .catch(() => {});
+              }
               error = undefined;
               break;
             } catch (e) {
