@@ -1,0 +1,5 @@
+node_modules/
+dist/
+pagestill-out/
+*.log
+.DS_Store
