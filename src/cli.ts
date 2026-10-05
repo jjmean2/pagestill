@@ -290,6 +290,15 @@ withConnection(program.command("crawl"))
     },
   );
 
+program
+  .command("edit")
+  .description("tick which pages of a job file to capture (keeps comments; E opens $EDITOR)")
+  .argument("<job>", "job YAML file")
+  .action(async (jobPath: string) => {
+    const { runEditJob } = await import("./tui/EditJob.js");
+    await runEditJob(jobPath);
+  });
+
 function pickTab(session: BrowserSession, query?: string) {
   if (!query) return session.active;
   const tabs = session.listTabs();

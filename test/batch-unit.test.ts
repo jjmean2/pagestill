@@ -88,6 +88,11 @@ describe("job", () => {
     setSkipped(doc, 2, false);
     const after = doc.toString();
     expect(after).toContain("# /users/:id — 3 found");
-    expect(YAML.parse(after).pages).toEqual(["/", { url: "/users/1", skip: true }, { url: "https://b.com/x" }]);
+    expect(YAML.parse(after).pages).toEqual(["/", { url: "/users/1", skip: true }, "https://b.com/x"]);
+    expect(after).toContain("- url: /users/1 # User 1");
+
+    const back = YAML.parseDocument(after);
+    setSkipped(back, 1, false);
+    expect(back.toString()).toContain("- /users/1 # User 1");
   });
 });

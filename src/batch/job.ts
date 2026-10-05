@@ -192,10 +192,22 @@ export function setSkipped(doc: Document, index: number, skip: boolean): void {
     if (!skip) return;
     const map = doc.createNode({ url: item.value, skip: true });
     map.commentBefore = item.commentBefore;
-    map.comment = item.comment;
+    // keep the trailing note next to the url: `- url: /x # Title`
+    const urlNode = map.get("url", true);
+    if (isScalar(urlNode)) urlNode.comment = item.comment;
     pages.items[index] = map;
   } else if (isMap(item)) {
-    if (skip) item.set("skip", true);
-    else item.delete("skip");
+    if (skip) {
+      item.set("skip", true);
+      return;
+    }
+    item.delete("skip");
+    // back to the short form when only the url is left
+    const urlNode = item.get("url", true);
+    if (item.items.length === 1 && isScalar(urlNode)) {
+      urlNode.commentBefore = item.commentBefore;
+      urlNode.comment ??= item.comment;
+      pages.items[index] = urlNode;
+    }
   }
 }
