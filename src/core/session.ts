@@ -1,6 +1,14 @@
 import { EventEmitter } from "node:events";
 import puppeteer, { type Browser, type CDPSession, type Page, type Target } from "puppeteer-core";
-import { DEFAULT_PORT, DEFAULT_PROFILE_DIR, launchChrome, probe, readDevToolsActivePort } from "./chrome.js";
+import {
+  DEFAULT_PORT,
+  DEFAULT_PROFILE_DIR,
+  explainActivePortError,
+  isPortOpen,
+  launchChrome,
+  probe,
+  readDevToolsActivePort,
+} from "./chrome.js";
 
 export interface ConnectOptions {
   port?: number;
@@ -14,7 +22,22 @@ export interface ConnectOptions {
   autoConnect?: boolean;
   /** URL to open when launching Chrome. */
   url?: string;
+  /** Progress messages for the user (e.g. "approve the prompt in Chrome"). */
+  log?: (message: string) => void;
 }
+
+/** Resolve with the promise's value, or with `fallback` after `ms` (tabs that are asleep never answer). */
+function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: NodeJS.Timeout;
+  return Promise.race([
+    p.catch(() => fallback),
+    new Promise<T>((r) => {
+      timer = setTimeout(() => r(fallback), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+const AUTO_CONNECT_TIMEOUT_MS = 60_000;
 
 export interface TabInfo {
   page: Page;
@@ -71,13 +94,21 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     let endpoint = opts.wsEndpoint;
     let launched = false;
     if (!endpoint && opts.autoConnect) {
-      endpoint = readDevToolsActivePort();
-      if (!endpoint) {
-        throw new Error("No DevToolsActivePort found. Enable remote debugging at chrome://inspect/#remote-debugging first.");
-      }
+      const active = readDevToolsActivePort();
+      if ("error" in active) throw new Error(explainActivePortError(active));
+      endpoint = active.endpoint;
+      opts.log?.(`Connecting to your Chrome on port ${active.port}. If Chrome asks to allow remote debugging, click Allow.`);
     }
     if (!endpoint) endpoint = await probe(port);
     if (!endpoint) {
+      if (await isPortOpen(port)) {
+        throw new Error(
+          `Port ${port} is in use but doesn't offer DevTools discovery (/json/version).\n` +
+            "If that is Chrome with remote debugging turned on at chrome://inspect, the port alone isn't enough: " +
+            "use --auto-connect (it reads the full address from Chrome's DevToolsActivePort file).\n" +
+            "Otherwise choose another --port.",
+        );
+      }
       if (opts.launch === false) throw new Error(`Nothing is listening on port ${port} (and --no-launch was given).`);
       endpoint = await launchChrome({
         port,
@@ -87,12 +118,23 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
       });
       launched = true;
     }
-    const browser = await puppeteer.connect({
+    const connecting = puppeteer.connect({
       browserWSEndpoint: endpoint,
       // Never resize the user's tabs on connect.
       defaultViewport: null,
       protocolTimeout: 180_000,
     });
+    const browser = opts.autoConnect
+      ? await Promise.race([
+          connecting,
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Chrome didn't accept the connection within 60s. Did you click Allow in Chrome's prompt?")),
+              AUTO_CONNECT_TIMEOUT_MS,
+            ),
+          ),
+        ])
+      : await connecting;
     const session = new BrowserSession(browser, endpoint, launched);
     session.onPageAdded = onPageAdded;
     await session.init();
@@ -160,7 +202,7 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     const info = this.tabs.get(page);
     if (!info) return this.addPage(page);
     info.url = page.url();
-    info.title = await page.title().catch(() => info.title);
+    info.title = await within(page.title(), 1500, info.title);
     this.emit("change");
   }
 
@@ -181,7 +223,7 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
 
   private async addPage(page: Page) {
     if (this.tabs.has(page)) return;
-    const info: TabInfo = { page, url: page.url(), title: await page.title().catch(() => "") };
+    const info: TabInfo = { page, url: page.url(), title: await within(page.title(), 1500, "") };
     this.tabs.set(page, info);
     page.on("close", () => this.onTargetDestroyed(page.target()));
     page.on("framenavigated", (frame) => {
@@ -199,14 +241,17 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     const url = page.url();
     // chrome://, devtools:// and extension pages can't be scripted
     if (/^(chrome|devtools|chrome-extension|edge|about:(?!blank))/.test(url)) return;
-    try {
-      await page.exposeFunction(SIGNAL_BINDING, (type: string) => this.onSignal(page, type));
-      await page.evaluateOnNewDocument(SIGNAL_SCRIPT);
-      await page.evaluate(SIGNAL_SCRIPT).catch(() => {});
-      await this.onPageAdded?.(page);
-    } catch {
-      // not scriptable; still listed and capturable as an image
-    }
+    // Discarded/frozen tabs (Chrome's Memory Saver) may never answer: don't let them block startup.
+    await within(
+      (async () => {
+        await page.exposeFunction(SIGNAL_BINDING, (type: string) => this.onSignal(page, type));
+        await page.evaluateOnNewDocument(SIGNAL_SCRIPT);
+        await page.evaluate(SIGNAL_SCRIPT).catch(() => {});
+        await this.onPageAdded?.(page);
+      })(),
+      5000,
+      undefined,
+    );
   }
 
   private onSignal(page: Page, type: string) {
@@ -220,9 +265,11 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
   private async pickInitialActive() {
     const states = await Promise.all(
       [...this.tabs.keys()].map(async (page) => {
-        const s = await page
-          .evaluate(() => ({ focus: document.hasFocus(), visible: document.visibilityState === "visible" }))
-          .catch(() => ({ focus: false, visible: false }));
+        const s = await within(
+          page.evaluate(() => ({ focus: document.hasFocus(), visible: document.visibilityState === "visible" })),
+          1500,
+          { focus: false, visible: false },
+        );
         return { page, ...s };
       }),
     );

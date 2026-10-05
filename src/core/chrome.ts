@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { connect as tcpConnect } from "node:net";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
@@ -98,14 +99,57 @@ export async function launchChrome(opts: LaunchOptions): Promise<string> {
  * chrome://inspect/#remote-debugging (recent Chrome versions). Chrome writes the port and path
  * to DevToolsActivePort in its user data dir.
  */
-export function readDevToolsActivePort(userDataDir = defaultChromeUserDataDir()): string | undefined {
+export type ActivePort =
+  | { endpoint: string; port: number }
+  | { error: "missing" | "blocked" | "invalid"; file: string; detail?: string };
+
+export function readDevToolsActivePort(userDataDir = defaultChromeUserDataDir()): ActivePort {
+  const file = join(userDataDir, "DevToolsActivePort");
+  let text: string;
   try {
-    const [port, path] = readFileSync(join(userDataDir, "DevToolsActivePort"), "utf8").split("\n");
-    if (!port || !path) return undefined;
-    return `ws://127.0.0.1:${port.trim()}${path.trim()}`;
-  } catch {
-    return undefined;
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    // macOS privacy protection (TCC) answers EPERM even though the file exists and is readable by mode
+    if (code === "EPERM" || code === "EACCES") return { error: "blocked", file, detail: code };
+    return { error: "missing", file, detail: code };
   }
+  const [port, path] = text.split("\n").map((l) => l.trim());
+  if (!port || !/^\d+$/.test(port) || !path?.startsWith("/")) return { error: "invalid", file, detail: text.slice(0, 80) };
+  return { endpoint: `ws://127.0.0.1:${port}${path}`, port: Number(port) };
+}
+
+export function explainActivePortError(r: Exclude<ActivePort, { endpoint: string }>): string {
+  switch (r.error) {
+    case "missing":
+      return (
+        "Chrome's remote debugging is not enabled (no DevToolsActivePort file).\n" +
+        "Open chrome://inspect/#remote-debugging in your everyday Chrome, turn on remote debugging, and keep Chrome running."
+      );
+    case "blocked":
+      return (
+        `macOS blocked reading ${r.file} (${r.detail}).\n` +
+        "Chrome keeps the connection address there, and your terminal app isn't allowed to read Chrome's data folder.\n" +
+        "Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal app (Terminal, iTerm, VS Code…), then restart it.\n" +
+        "Or skip --auto-connect: plain `pagestill` opens its own Chrome where logins persist."
+      );
+    case "invalid":
+      return `Unexpected DevToolsActivePort content in ${r.file}: ${JSON.stringify(r.detail)}`;
+  }
+}
+
+/** True when something accepts TCP connections on the port. */
+export function isPortOpen(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = tcpConnect({ host: "127.0.0.1", port });
+    const done = (open: boolean) => {
+      sock.destroy();
+      resolve(open);
+    };
+    sock.setTimeout(1000, () => done(false));
+    sock.once("connect", () => done(true));
+    sock.once("error", () => done(false));
+  });
 }
 
 export function defaultChromeUserDataDir(): string {

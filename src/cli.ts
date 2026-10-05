@@ -78,6 +78,7 @@ function connectOptions(f: ConnectionFlags, url?: string): ConnectOptions {
     wsEndpoint: f.ws,
     autoConnect: f.autoConnect,
     url,
+    log: (m) => process.stderr.write(`${m}\n`),
   };
 }
 
