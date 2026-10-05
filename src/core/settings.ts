@@ -149,7 +149,12 @@ export function formatDpr(d: DprSetting): string {
 }
 
 /** Deep-merge a partial (e.g. a preset or config file) onto settings. */
+/** Always returns a fresh object, so callers may mutate the result. */
 export function mergeSettings(base: CaptureSettings, patch: Partial<CaptureSettings> | undefined): CaptureSettings {
-  if (!patch) return base;
-  return { ...base, ...patch, htmlOptions: { ...base.htmlOptions, ...(patch.htmlOptions ?? {}) } };
+  return {
+    ...base,
+    ...patch,
+    hideSelectors: [...(patch?.hideSelectors ?? base.hideSelectors)],
+    htmlOptions: { ...base.htmlOptions, ...(patch?.htmlOptions ?? {}) },
+  };
 }

@@ -37,6 +37,16 @@ describe("settings", () => {
     expect(withOutputMode(DEFAULT_SETTINGS, "image")).toMatchObject({ image: true, html: false });
   });
 
+  it("never hands out the defaults object itself", () => {
+    const s = mergeSettings(DEFAULT_SETTINGS, undefined);
+    s.outDir = "elsewhere";
+    s.htmlOptions.keepScripts = true;
+    s.hideSelectors.push(".x");
+    expect(DEFAULT_SETTINGS.outDir).toBe("pagestill-out");
+    expect(DEFAULT_SETTINGS.htmlOptions.keepScripts).toBe(false);
+    expect(DEFAULT_SETTINGS.hideSelectors).toEqual([]);
+  });
+
   it("deep-merges html options", () => {
     const s = mergeSettings(DEFAULT_SETTINGS, { htmlOptions: { keepScripts: true } as never });
     expect(s.htmlOptions.keepScripts).toBe(true);
