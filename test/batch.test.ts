@@ -18,7 +18,7 @@ describe.skipIf(!findChrome())("batch run against a real Chrome", () => {
   beforeAll(async () => {
     site = await startSite();
     session = await BrowserSession.connect({ port: 9000 + Math.floor(Math.random() * 900), profileDir: join(tmp, "profile") });
-  }, 60_000);
+  }, 120_000);
 
   afterAll(async () => {
     await session?.browser.close().catch(() => {});

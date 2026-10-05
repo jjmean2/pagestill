@@ -25,7 +25,7 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
     await page.goto(base, { waitUntil: "networkidle0" });
     await page.waitForFunction(() => document.getElementById("state")?.textContent === "changed by JS");
     session.pin(page);
-  }, 60_000);
+  }, 120_000);
 
   afterAll(async () => {
     await session?.browser.close().catch(() => {});

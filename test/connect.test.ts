@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { explainActivePortError, readDevToolsActivePort } from "../src/core/chrome.js";
+import { explainActivePortError, launchChrome, readDevToolsActivePort } from "../src/core/chrome.js";
 import { BrowserSession } from "../src/core/session.js";
 
 const dir = () => mkdtempSync(join(tmpdir(), "pagestill-chrome-"));
@@ -50,5 +50,15 @@ describe("--port pointing at a Chrome without discovery", () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe("launch failures", () => {
+  it("says Chrome exited instead of waiting out the timeout", async () => {
+    const started = Date.now();
+    await expect(launchChrome({ port: 9999, chromePath: "/usr/bin/false", profileDir: join(dir(), "p") })).rejects.toThrow(
+      /Chrome exited \(code 1\)/,
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });

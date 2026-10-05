@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { connect as tcpConnect } from "node:net";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
@@ -79,20 +79,33 @@ export async function launchChrome(opts: LaunchOptions): Promise<string> {
     ...(process.env.PAGESTILL_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean),
     opts.url ?? "about:blank",
   ];
-  const child = spawn(exe, args, { detached: true, stdio: "ignore" });
+  // Chrome's stderr goes to a file (not a pipe: the browser outlives pagestill) so failures can be explained.
+  const logFile = join(opts.profileDir, "pagestill-chrome.log");
+  const fd = openSync(logFile, "w");
+  const child = spawn(exe, args, { detached: true, stdio: ["ignore", "ignore", fd] });
+  closeSync(fd);
   child.unref();
-  const deadline = Date.now() + 20_000;
+  // A first start with a fresh profile on a cold machine (or CI) can take a while.
+  const deadline = Date.now() + LAUNCH_TIMEOUT_MS;
   while (Date.now() < deadline) {
     const ws = await probe(opts.port);
     if (ws) return ws;
     if (child.exitCode !== null) break;
     await new Promise((r) => setTimeout(r, 250));
   }
+  const why = child.exitCode !== null ? `Chrome exited (code ${child.exitCode})` : `No answer within ${LAUNCH_TIMEOUT_MS / 1000}s`;
+  let tail = "";
+  try {
+    tail = readFileSync(logFile, "utf8").trim().split("\n").slice(-8).join("\n");
+  } catch {}
   throw new Error(
-    `Chrome did not open a debugging port on ${opts.port}. If a Chrome using the same profile is already ` +
-      `running without remote debugging, quit it first.`,
+    `Chrome did not open a debugging port on ${opts.port}. ${why}.\n` +
+      "If a Chrome using the same profile is already running without remote debugging, quit it first." +
+      (tail ? `\nChrome's last output (${logFile}):\n${tail}` : ""),
   );
 }
+
+const LAUNCH_TIMEOUT_MS = 60_000;
 
 /**
  * Experimental: connect to the user's everyday Chrome after they enabled remote debugging at
