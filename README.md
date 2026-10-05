@@ -77,7 +77,16 @@ pagestill open https://admin.acme.com            # just open the pagestill Chrom
 
 Extra Chrome flags for the launched browser can be passed with `PAGESTILL_CHROME_ARGS` (e.g. `--proxy-server=...`).
 
-Connection flags work with every command: `--port`, `--no-launch`, `--chrome <path>`, `--profile <dir>`, `--ws <endpoint>`, and `--auto-connect`. `--auto-connect` is experimental: it attaches to your everyday Chrome after you enable remote debugging at `chrome://inspect/#remote-debugging`, on Chrome versions that support it.
+Connection flags work with every command: `--port`, `--no-launch`, `--chrome <path>`, `--profile <dir>`, `--ws <endpoint>`, and `--auto-connect`.
+
+### Using your everyday Chrome (`--auto-connect`, experimental)
+
+1. In Chrome (144+), open `chrome://inspect/#remote-debugging` and turn remote debugging on. Chrome shows `Server running at: 127.0.0.1:<port>`.
+2. Run `pagestill --auto-connect` and click **Allow** when Chrome asks.
+
+The port Chrome shows is not enough on its own. In this mode Chrome doesn't answer the usual discovery requests (`/json/version` returns 404), so `--port <that port>` can't work. pagestill reads the full address from the `DevToolsActivePort` file in Chrome's profile folder instead. **On macOS your terminal app needs Full Disk Access to read that file** (System Settings → Privacy & Security → Full Disk Access). Without it, pagestill tells you the read was blocked.
+
+If that's more setup than you want, the default mode (pagestill opens its own Chrome with a persistent profile) needs none of it.
 
 ## Many pages at once
 
