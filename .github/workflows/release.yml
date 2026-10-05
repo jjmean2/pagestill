@@ -1,0 +1,72 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching package.json "version") to test, pack, and publish a
+# GitHub Release with the installable tarball attached. Tags with a "-" (v0.2.0-rc.1) become
+# prereleases. Run it manually (Actions → Release → Run workflow) for a dry run: everything
+# except the release, with the tarball uploaded as a workflow artifact instead.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # pnpm version comes from "packageManager" in package.json; also runs pnpm install.
+      - uses: pnpm/setup@v3
+        with:
+          runtime: node@24
+          cache: true
+          require-lockfile: true
+
+      - name: Check tag matches package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version ($version)"
+            exit 1
+          fi
+
+      - run: pnpm typecheck
+
+      # e2e tests launch the runner's preinstalled Chrome; no display and no sandbox on CI.
+      - run: pnpm test
+        env:
+          PAGESTILL_CHROME_ARGS: --headless=new --no-sandbox
+
+      - name: Pack
+        id: pack
+        run: |
+          pnpm pack
+          echo "file=$(ls pagestill-*.tgz)" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: ${{ steps.pack.outputs.file }}
+        run: |
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$FILE"
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          # shellcheck disable=SC2016 # the backticks are a literal Markdown code fence
+          gh release create "$GITHUB_REF_NAME" "$FILE" \
+            --verify-tag \
+            --title "pagestill $GITHUB_REF_NAME" \
+            --generate-notes \
+            --notes "$(printf 'Install:\n\n```sh\npnpm add -g %s\n```\n\nRequires Node 22+ and Chrome/Chromium.' "$url")" \
+            $prerelease
+
+      - name: Upload tarball (dry run)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tarball
+          path: ${{ steps.pack.outputs.file }}

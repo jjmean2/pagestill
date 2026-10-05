@@ -74,6 +74,8 @@ export async function launchChrome(opts: LaunchOptions): Promise<string> {
     "--disable-background-timer-throttling",
     "--disable-renderer-backgrounding",
     "--disable-backgrounding-occluded-windows",
+    // extra flags, e.g. "--headless=new --no-sandbox" on CI or "--proxy-server=..."
+    ...(process.env.PAGESTILL_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean),
     opts.url ?? "about:blank",
   ];
   const child = spawn(exe, args, { detached: true, stdio: "ignore" });
