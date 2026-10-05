@@ -72,6 +72,8 @@ pagestill tabs                                   # list tabs; ★ = what `shot` 
 pagestill open https://admin.acme.com            # just open the pagestill Chrome
 ```
 
+Extra Chrome flags for the launched browser can be passed with `PAGESTILL_CHROME_ARGS` (e.g. `--proxy-server=...`).
+
 Connection flags work with every command: `--port`, `--no-launch`, `--chrome <path>`, `--profile <dir>`, `--ws <endpoint>`, and `--auto-connect`. `--auto-connect` is experimental: it attaches to your everyday Chrome after you enable remote debugging at `chrome://inspect/#remote-debugging`, on Chrome versions that support it.
 
 ## Settings
@@ -110,6 +112,13 @@ browser:
   port: 9222
 ```
 
+## Security notes
+
+- The Chrome that pagestill launches listens for DevTools connections on `127.0.0.1:<port>` (9222 by default) while it runs. Any program on **your machine** can then control that browser, including the sessions you are logged into. It is not reachable from the network. Close that Chrome when you're done if this matters to you, or use a separate OS user.
+- The `~/.pagestill/chrome-profile` profile stores the cookies and logins you make in that window. Treat it like any browser profile.
+- To follow the focused tab, pagestill exposes a small `__pagestillSignal` function to each page. A page could call it to trigger a capture, which writes files to your output folder. It can't do anything else.
+- HTML snapshots inline everything that was on screen, including personal data visible in a logged-in page. Review them before sharing.
+
 ## How it works
 
 ```
@@ -145,12 +154,22 @@ To use another engine, add `src/archivers/<id>/index.ts` that exports an `Archiv
 - Record mode: collect URLs as you browse, optionally auto-capture on each navigation
 - Crawler that builds an editable page list (pattern grouping, safe exclusions)
 
+## Releasing
+
+Bump `version` in `package.json`, commit and push, then push a matching tag:
+
+```sh
+git tag -a v0.2.0 -m "pagestill v0.2.0" && git push origin v0.2.0
+```
+
+The [Release workflow](.github/workflows/release.yml) typechecks, tests (headless Chrome), runs `pnpm pack`, and creates a GitHub Release with the tarball attached. Install with `pnpm add -g https://github.com/jjmean2/pagestill/releases/download/v0.2.0/pagestill-0.2.0.tgz`. Tags containing `-` (e.g. `v0.2.0-rc.1`) are published as prereleases. Run the workflow manually for a dry run that skips the release.
+
 ## Development
 
 ```sh
 pnpm install
 pnpm dev            # run from source (tsx)
-pnpm test           # unit + e2e (e2e launches a throwaway Chrome)
+pnpm test           # unit + e2e (e2e launches a throwaway Chrome; PAGESTILL_CHROME_ARGS="--headless=new" to hide it)
 pnpm build          # dist/cli.js
 pnpm add -g "link:$PWD"   # put this checkout's `pagestill` on PATH (rebuilds apply instantly)
 pnpm remove -g pagestill  # undo
