@@ -2,7 +2,9 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Job } from "../src/batch/job.js";
+import YAML from "yaml";
+import { crawl, crawlEntries } from "../src/batch/crawler.js";
+import { type Job, writeJobFile } from "../src/batch/job.js";
 import { type LoginDecision, type RunEvent, readManifest, runJob } from "../src/batch/runner.js";
 import { findChrome } from "../src/core/chrome.js";
 import { BrowserSession } from "../src/core/session.js";
@@ -71,5 +73,36 @@ describe.skipIf(!findChrome())("batch run against a real Chrome", () => {
     expect(events.find((e) => e.type === "start")).toMatchObject({ total: 4, alreadyDone: 2 });
     expect(site.hits.get("/site/a")).toBe(before); // a was not visited again
     expect(Object.keys(readManifest(runDir)!.entries).sort()).toEqual(["a/390x844m", "a/800x600", "b--x-1/390x844m", "b--x-1/800x600"]);
+  }, 120_000);
+
+  it("crawls the logged-in site into an editable job file", async () => {
+    const browserSession = await session.browser.target().createCDPSession();
+    await browserSession.send("Storage.clearCookies");
+    await browserSession.detach();
+    const logins: string[] = [];
+    const result = await crawl({
+      session,
+      start: `${site.base}site/`,
+      maxDepth: 5,
+      onLogin: async ({ url }) => {
+        logins.push(url);
+        await session.browser.defaultBrowserContext().setCookie({ name: "auth", value: "1", domain: "localhost", path: "/" });
+        return "retry";
+      },
+    });
+    const paths = result.pages.map((p) => new URL(p.url).pathname + new URL(p.url).search).sort();
+    expect(paths).toEqual(["/site", "/site/a", "/site/b?x=1", "/site/private", "/site/users/1"]);
+    expect(result.pages.every((p) => p.status === "ok")).toBe(true);
+    expect(logins).toEqual([`${site.base}site/private`]);
+    expect(result.discovered.get(`${site.base.slice(0, -1)}/site/users/:id`)).toHaveLength(2);
+    for (const never of ["/site/logout", "/site/report.pdf", "/site/users/2"]) expect(site.hits.get(never), never).toBeUndefined();
+
+    const file = join(tmp, "pages.yaml");
+    writeJobFile(file, { header: " test", base: site.base, entries: crawlEntries(result) });
+    const text = readFileSync(file, "utf8");
+    expect(text).toMatch(/# \/site\/users\/:id — 2 URLs found\n\s+- \/site\/users\/1 # User 1/);
+    const listed = YAML.parse(text).pages as string[];
+    expect(listed[0]).toBe("/site"); // start page first
+    expect([...listed].sort()).toEqual(["/site", "/site/a", "/site/b?x=1", "/site/private", "/site/users/1"]);
   }, 120_000);
 });

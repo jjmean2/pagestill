@@ -176,7 +176,7 @@ export function writeJobFile(path: string, opts: { header: string; base?: string
     pages.items.forEach((item, i) => {
       const e = opts.entries[i]!;
       if (e.comment && (isScalar(item) || isMap(item))) item.commentBefore = e.comment;
-      if (e.note && (isScalar(item) || isMap(item))) item.comment = e.note;
+      if (e.note && (isScalar(item) || isMap(item))) item.comment = ` ${e.note.replace(/\s+/g, " ")}`;
     });
   }
   if (!opts.base) doc.delete("base");
