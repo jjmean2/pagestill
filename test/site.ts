@@ -50,6 +50,13 @@ export async function startSite(): Promise<TestSite> {
         if (!authed) return res.writeHead(302, { location: "/site/login?next=/site/private" }).end();
         return html(page("Private", "<p>secret dashboard</p>"));
       }
+      if (p.startsWith("/site/spa"))
+        return html(
+          page(
+            "SPA",
+            `<button id="go" onclick="history.pushState({}, '', '/site/spa/settings'); document.title = 'SPA Settings'; this.textContent = 'moved'">go</button>`,
+          ),
+        );
       if (p === "/site/login") return html(page("Login", "<form><input name=u></form>"));
       if (p === "/site/logout") return html(page("Bye", ""));
       return res.writeHead(404).end();

@@ -7,7 +7,11 @@ import type { Page } from "puppeteer-core";
 import { type CaptureResult, capture } from "../core/capture.js";
 import { type Config, diffFromDefaults, saveConfig } from "../core/config.js";
 import { PASSTHROUGH_KEY, applyEmulation, clearEmulation, emulationKey } from "../core/emulation.js";
+import { writeJobFile } from "../batch/job.js";
+import { localDateTime, localStamp } from "../core/filename.js";
 import { formatBytes } from "../core/format.js";
+import { quiet } from "../core/navigate.js";
+import { normalizeUrl } from "../core/urls.js";
 import type { BrowserSession } from "../core/session.js";
 import { type CaptureSettings, mergeSettings, withOutputMode } from "../core/settings.js";
 import { type Field, HOTKEY_FIELDS } from "./fields.js";
@@ -42,6 +46,14 @@ export function App({ session, initialSettings, config, version, onSettings }: A
   /** Emulation key currently applied per page (WYSIWYG: the browser shows what will be captured). */
   const applied = useRef(new Map<Page, string>());
   const emuChain = useRef(Promise.resolve());
+  // Record mode: URLs visited while recording, saved as a job file. Auto-capture: capture after
+  // every navigation once the page has settled.
+  const [recording, setRecording] = useState(false);
+  const [autoCapture, setAutoCapture] = useState(false);
+  const [recorded, setRecorded] = useState<{ url: string; title: string }[]>([]);
+  const recordingRef = useRef(false);
+  const autoRef = useRef(false);
+  const recordedUrls = useRef(new Set<string>());
 
   const setSettings = useCallback(
     (s: CaptureSettings) => {
@@ -53,6 +65,83 @@ export function App({ session, initialSettings, config, version, onSettings }: A
   );
 
   const fail = (e: unknown) => setMessage({ text: e instanceof Error ? e.message : String(e), error: true });
+
+  /** Add a URL to the recording right away (fast clicks must not be lost); the title comes later. */
+  function remember(rawUrl: string) {
+    const url = normalizeUrl(rawUrl);
+    if (!url || recordedUrls.current.has(url)) return;
+    recordedUrls.current.add(url);
+    setRecorded((r) => [...r, { url, title: "" }]);
+  }
+
+  async function fillTitle(page: Page) {
+    const url = normalizeUrl(page.url());
+    const title = await page.title().catch(() => "");
+    if (url && title) setRecorded((r) => r.map((x) => (x.url === url && !x.title ? { ...x, title } : x)));
+  }
+
+  // Navigations drive Record mode and auto-capture (debounced: redirects and SPA route changes
+  // often come in bursts).
+  useEffect(() => {
+    const timers = new Map<Page, NodeJS.Timeout>();
+    const onNav = (page: Page, url: string) => {
+      if (!recordingRef.current && !autoRef.current) return;
+      if (!session.follow && page !== session.active) return;
+      if (!/^(https?|file):/.test(url)) return;
+      if (recordingRef.current) remember(url);
+      clearTimeout(timers.get(page));
+      timers.set(
+        page,
+        setTimeout(async () => {
+          await quiet(page, 500, 8000);
+          if (recordingRef.current) await fillTitle(page);
+          if (autoRef.current) await runCapture(settingsRef.current, page);
+        }, 700),
+      );
+    };
+    session.on("navigated", onNav);
+    return () => {
+      session.off("navigated", onNav);
+      for (const t of timers.values()) clearTimeout(t);
+    };
+  }, [session]);
+
+  function toggleRecording() {
+    if (!recordingRef.current) {
+      recordingRef.current = true;
+      setRecording(true);
+      if (session.active) {
+        remember(session.active.url());
+        void fillTitle(session.active);
+      }
+      setMessage({ text: "Recording: every page you open in Chrome is added. r again to stop and save." });
+      return;
+    }
+    recordingRef.current = false;
+    setRecording(false);
+    if (!recorded.length) return setMessage({ text: "Recording stopped (nothing recorded)" });
+    const first = new URL(recorded[0]!.url);
+    setPrompt({
+      label: `Save ${recorded.length} recorded pages to:`,
+      hint: "esc keeps the list; r resumes recording",
+      initial: `pages-${first.hostname || "local"}-${localStamp()}.yaml`,
+      submit: (path) => {
+        const file = path.trim();
+        if (!file) throw new Error("File name is required");
+        writeJobFile(file, {
+          header: [
+            ` Recorded with pagestill on ${localDateTime()}`,
+            " Edit freely (or `pagestill edit`), then: pagestill run <this file>",
+          ].join("\n"),
+          base: first.protocol === "file:" ? undefined : `${first.origin}/`,
+          entries: recorded.map((r) => ({ url: r.url, note: r.title || undefined })),
+        });
+        recordedUrls.current.clear();
+        setRecorded([]);
+        setMessage({ text: `Saved ${file} · pagestill edit ${file} · pagestill run ${file}` });
+      },
+    });
+  }
 
   // Re-render on tab/focus changes; capture on the in-page hotkey.
   useEffect(() => {
@@ -150,6 +239,12 @@ export function App({ session, initialSettings, config, version, onSettings }: A
       if (input === "e") return setView("settings");
       if (input === "p") return setView("presets");
       if (input === "O") return openFolder(settings.outDir);
+      if (input === "r") return toggleRecording();
+      if (input === "u") {
+        autoRef.current = !autoRef.current;
+        setAutoCapture(autoRef.current);
+        return setMessage({ text: autoRef.current ? "Auto-capture on: every navigation is captured once it settles" : "Auto-capture off" });
+      }
       const field = HOTKEY_FIELDS.find((f) => f.hotkey === input || f.hotkey?.toUpperCase() === input);
       if (!field) return;
       const shifted = input !== field.hotkey;
@@ -171,6 +266,8 @@ export function App({ session, initialSettings, config, version, onSettings }: A
         <Text color="green">● </Text>
         <Text dimColor>{session.launched ? "launched Chrome" : "attached"} · tab: </Text>
         {session.follow ? <Text color="green">follows focus</Text> : <Text color="yellow">pinned</Text>}
+        {recording ? <Text color="red"> ● REC {recorded.length}</Text> : null}
+        {autoCapture ? <Text color="yellow"> ◉ AUTO</Text> : null}
       </Text>
       <Rule />
       {tab ? (
@@ -238,6 +335,22 @@ export function App({ session, initialSettings, config, version, onSettings }: A
 
       {view === "main" && !prompt && (
         <>
+          {(recording || recorded.length > 0) && (
+            <>
+              <Rule />
+              <Text dimColor>
+                RECORDED {recorded.length}
+                {recording ? "" : " (paused · r to resume)"}
+              </Text>
+              {recorded.slice(-3).map((r) => (
+                <Text key={r.url} wrap="truncate-end">
+                  {"  "}
+                  {r.url}
+                  <Text dimColor> {r.title}</Text>
+                </Text>
+              ))}
+            </>
+          )}
           <Rule />
           <Text dimColor>RECENT</Text>
           {recent.length === 0 ? (
@@ -260,7 +373,7 @@ export function App({ session, initialSettings, config, version, onSettings }: A
       )}
       {view === "main" && !prompt && (
         <Text dimColor wrap="wrap">
-          <Text color="white">⏎</Text> capture  <Text color="white">s</Text> image  <Text color="white">h</Text> html  <Text color="white">t</Text> tab  <Text color="white">e</Text> settings  <Text color="white">p</Text> presets  <Text color="white">O</Text> folder  <Text color="white">q</Text> quit  · in browser: Alt+Shift+S
+          <Text color="white">⏎</Text> capture  <Text color="white">s</Text> image  <Text color="white">h</Text> html  <Text color="white">t</Text> tab  <Text color="white">e</Text> settings  <Text color="white">p</Text> presets  <Text color="white">r</Text> record  <Text color="white">u</Text> auto-capture  <Text color="white">O</Text> folder  <Text color="white">q</Text> quit  · in browser: Alt+Shift+S
         </Text>
       )}
     </Box>

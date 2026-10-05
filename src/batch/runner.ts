@@ -4,7 +4,7 @@ import type { Page } from "puppeteer-core";
 import { capture } from "../core/capture.js";
 import type { Config } from "../core/config.js";
 import { applyEmulation, emulationKey, settle } from "../core/emulation.js";
-import { slugify } from "../core/filename.js";
+import { localStamp, slugify } from "../core/filename.js";
 import { gotoAndWait, runActions } from "../core/navigate.js";
 import type { BrowserSession } from "../core/session.js";
 import { type CaptureSettings, DEFAULT_SETTINGS, mergeSettings } from "../core/settings.js";
@@ -92,11 +92,6 @@ function writeManifest(runDir: string, m: Manifest) {
   renameSync(tmp, join(runDir, MANIFEST));
 }
 
-function timestamp(d = new Date()) {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-}
-
 export async function runJob(opts: RunOptions): Promise<{ runDir: string; manifest: Manifest }> {
   const { session, job, onEvent } = opts;
   const base = baseSettings(job, opts.config);
@@ -104,7 +99,7 @@ export async function runJob(opts: RunOptions): Promise<{ runDir: string; manife
   const vars = variants(job.matrix);
   if (!pages.length) throw new Error("The job has no pages to capture (all skipped?)");
 
-  const runDir = resolve(opts.runDir ?? join(job.out ?? base.outDir, `${slugify(job.name ?? "job") || "job"}-${timestamp()}`));
+  const runDir = resolve(opts.runDir ?? join(job.out ?? base.outDir, `${slugify(job.name ?? "job") || "job"}-${localStamp()}`));
   mkdirSync(runDir, { recursive: true });
   const manifest: Manifest = readManifest(runDir) ?? {
     version: 1,

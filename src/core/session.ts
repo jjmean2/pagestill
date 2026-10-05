@@ -27,6 +27,8 @@ export type SessionEvents = {
   /** The in-page hotkey (Alt+Shift+S) was pressed on this page. */
   hotkey: [Page];
   disconnected: [];
+  /** Main-frame navigation, including same-document (pushState) route changes. */
+  navigated: [Page, string];
 };
 
 const SIGNAL_BINDING = "__pagestillSignal";
@@ -182,6 +184,11 @@ export class BrowserSession extends EventEmitter<SessionEvents> {
     const info: TabInfo = { page, url: page.url(), title: await page.title().catch(() => "") };
     this.tabs.set(page, info);
     page.on("close", () => this.onTargetDestroyed(page.target()));
+    page.on("framenavigated", (frame) => {
+      if (frame !== page.mainFrame()) return;
+      info.url = frame.url();
+      this.emit("navigated", page, frame.url());
+    });
     await this.install(page);
     this.emit("change");
   }

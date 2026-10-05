@@ -12,6 +12,16 @@ export interface FilenameVars {
 
 const pad = (n: number, w = 2) => String(n).padStart(w, "0");
 
+/** Local-time stamp for file names: YYYYMMDD-HHmmss. */
+export function localStamp(d = new Date()): string {
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+}
+
+/** Local date and time for humans: YYYY-MM-DD HH:mm. */
+export function localDateTime(d = new Date()): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Filesystem-safe, readable slug. Keeps non-ASCII letters (e.g. Korean). */
 export function slugify(text: string, max = 80): string {
   const s = text
