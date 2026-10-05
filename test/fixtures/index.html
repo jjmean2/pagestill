@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>pagestill fixture</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1 id="title">Fixture</h1>
+<p class="ext">external stylesheet → green</p>
+<p class="cssom">CSSOM insertRule → blue</p>
+<div id="shadow-host"></div>
+<canvas id="cv" width="120" height="40"></canvas>
+<img src="dot.svg" width="40" height="40" alt="dot">
+<input id="field" value="">
+<div id="state">initial</div>
+<iframe id="xframe" width="300" height="80"></iframe>
+<div class="cookie-banner">COOKIE BANNER</div>
+<div id="tall" style="height: 9000px; background: linear-gradient(#fff, #f80);"></div>
+<div id="bottom">BOTTOM</div>
+<script>
+  const s = document.createElement("style"); document.head.appendChild(s);
+  s.sheet.insertRule(".cssom { color: rgb(0, 0, 255); }");
+  const root = document.getElementById("shadow-host").attachShadow({ mode: "open" });
+  root.innerHTML = "<style>b{color:rgb(255,0,255)}</style><b>shadow content</b>";
+  const ctx = document.getElementById("cv").getContext("2d"); ctx.fillStyle = "red"; ctx.fillRect(0, 0, 120, 40);
+  setTimeout(() => { document.getElementById("state").textContent = "changed by JS"; document.getElementById("field").value = "typed value"; }, 200);
+  document.getElementById("xframe").src = location.protocol + "//" + (location.hostname === "localhost" ? "127.0.0.1" : "localhost") + ":" + location.port + "/frame.html";
+</script>
+</body>
+</html>
