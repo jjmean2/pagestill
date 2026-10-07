@@ -267,13 +267,19 @@ To use another engine, add `src/archivers/<id>/index.ts` that exports an `Archiv
 
 ## Releasing
 
-Bump `version` in `package.json`, commit and push, then push a matching tag:
-
 ```sh
-git tag -a v0.2.0 -m "pagestill v0.2.0" && git push origin v0.2.0
+pnpm release patch --dry-run   # preview: checks + "0.2.0 → 0.2.1 (tag v0.2.1)", changes nothing
+pnpm release patch             # or minor | major | 1.2.3 | prerelease --preid rc
 ```
 
-The [Release workflow](.github/workflows/release.yml) typechecks, tests (headless Chrome), runs `pnpm pack`, and creates a GitHub Release with the tarball attached. Install with `pnpm add -g https://github.com/jjmean2/pagestill/releases/download/v0.2.0/pagestill-0.2.0.tgz`. Tags containing `-` (e.g. `v0.2.0-rc.1`) are published as prereleases. Run the workflow manually for a dry run that skips the release.
+[`scripts/release.mjs`](scripts/release.mjs) does the whole thing:
+
+1. Refuses to release from a bad state: not on `main`, uncommitted changes, behind `origin/main`, or the target tag already exists locally or on `origin`.
+2. Runs typecheck and the tests (headless Chrome).
+3. Runs `pnpm version`, which bumps `package.json`, commits `chore: release x.y.z` and creates the annotated tag `vX.Y.Z`.
+4. Pushes the commit and the tag atomically. The tag triggers the [Release workflow](.github/workflows/release.yml), which tests again, runs `pnpm pack`, and publishes a GitHub Release with the tarball. With `gh` installed, the script follows the run and prints the install command. Set `RELEASE_NO_WATCH=1` to skip that.
+
+Versions with a `-` (e.g. `0.3.0-rc.0`) become prereleases. If the workflow fails, the script prints the commands to move the tag after you push a fix. Running the workflow manually from the Actions tab is a dry run that uploads the tarball as an artifact instead of releasing.
 
 ## Development
 
