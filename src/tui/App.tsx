@@ -37,6 +37,7 @@ export function App({ session, initialSettings, config, version, onSettings }: A
   const [settings, setSettingsState] = useState(initialSettings);
   const [view, setView] = useState<View>("main");
   const [prompt, setPrompt] = useState<PromptState>();
+  const [settingsCursor, setSettingsCursor] = useState(0);
   const [busy, setBusy] = useState<string>();
   const [message, setMessage] = useState<{ text: string; error?: boolean }>();
   const [recent, setRecent] = useState<CaptureResult[]>([]);
@@ -302,7 +303,14 @@ export function App({ session, initialSettings, config, version, onSettings }: A
       ) : view === "tabs" ? (
         <TabsView session={session} onDone={() => setView("main")} />
       ) : view === "settings" ? (
-        <SettingsView settings={settings} onChange={setSettings} onEdit={edit} onDone={() => setView("main")} />
+        <SettingsView
+          settings={settings}
+          onChange={setSettings}
+          onEdit={edit}
+          onDone={() => setView("main")}
+          cursor={settingsCursor}
+          setCursor={setSettingsCursor}
+        />
       ) : view === "presets" ? (
         <PresetsView
           presets={presets}

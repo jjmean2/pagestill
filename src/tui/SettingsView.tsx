@@ -1,5 +1,4 @@
 import { Box, Text, useInput } from "ink";
-import { useState } from "react";
 import type { CaptureSettings } from "../core/settings.js";
 import { FIELDS, type Field } from "./fields.js";
 
@@ -8,10 +7,15 @@ export interface SettingsViewProps {
   onChange: (s: CaptureSettings) => void;
   onEdit: (field: Field) => void;
   onDone: () => void;
+  /**
+   * Selected row, owned by the parent: this view unmounts while a value is being typed in the
+   * prompt, and the selection should still be there afterwards (and on the next visit).
+   */
+  cursor: number;
+  setCursor: (update: (c: number) => number) => void;
 }
 
-export function SettingsView({ settings, onChange, onEdit, onDone }: SettingsViewProps) {
-  const [cursor, setCursor] = useState(0);
+export function SettingsView({ settings, onChange, onEdit, onDone, cursor, setCursor }: SettingsViewProps) {
   const field = FIELDS[cursor]!;
   useInput((input, key) => {
     if (key.escape || input === "e" || input === "q") return onDone();
