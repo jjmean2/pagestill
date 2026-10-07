@@ -1,0 +1,10 @@
+# Recorded with pagestill on 2026-10-07 22:32
+# Edit freely (or `pagestill edit`), then: pagestill run <this file>
+
+base: https://www.priviatravel.com/
+settings: {}
+pages:
+  - /flight # PRIVIA 항공
+  - /hotel # PRIVIA 호텔 예약 - 현대카드 전용 혜택 & 할인 쿠폰 | PRIVIA 호텔
+  - https://pgr21.com/
+  - https://pgr21.com/humor/0 # Pgr21 - 유머 게시판
