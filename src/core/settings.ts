@@ -29,6 +29,12 @@ export interface HtmlOptions {
   maxResourceSizeMB: number;
   /** Minify the HTML whitespace. */
   compressHTML: boolean;
+  /**
+   * Rewrite relative links (href) to absolute URLs so they still lead to the site from a saved file.
+   * Off by default: it changes attribute values, and selectors like a[href^="http"] then match
+   * elements they didn't match on the live page (seen in the wild: links turning red).
+   */
+  absoluteLinks: boolean;
 }
 
 export interface CaptureSettings {
@@ -86,6 +92,7 @@ export const DEFAULT_SETTINGS: CaptureSettings = {
     includeFrames: true,
     maxResourceSizeMB: 10,
     compressHTML: true,
+    absoluteLinks: false,
   },
   outDir: "pagestill-out",
   filename: "{date}-{time}_{host}_{slug}",

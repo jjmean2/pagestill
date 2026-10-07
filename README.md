@@ -200,6 +200,7 @@ Each run writes `<page>/<variant>.png|.html` (variant = matrix combination, e.g.
 | HTML: remove unused CSS | on | |
 | HTML: include frames | on | including cross-origin iframes |
 | HTML: max resource size | 10MB | |
+| HTML: absolute links | off | rewrite relative `href`s to absolute URLs so links in a saved file lead to the site. Off because it can change the look: rules like `a[href^="http"]` would then match links they didn't match live |
 | Output folder, filename | `pagestill-out`, `{date}-{time}_{host}_{slug}` | also `{title} {w} {h} {dpr}`; `/` creates folders |
 
 Last-used settings and presets are stored in `~/.pagestill/config.yaml`. Set `PAGESTILL_HOME` to change the location.
@@ -256,6 +257,7 @@ To use another engine, add `src/archivers/<id>/index.ts` that exports an `Archiv
 - Full-page capture temporarily enlarges the viewport, so `100vh` elements stretch and `position: fixed` elements appear once, at their initial position.
 - The HTML snapshot keeps how the page looks, not how it behaves: no JS, no hover states, and inner scroll positions are reset.
 - WebGL canvases created without `preserveDrawingBuffer` may come out blank in the HTML snapshot.
+- Images, fonts and stylesheets are inlined as `data:` URLs, so CSS that selects on those attributes (e.g. `img[src$=".gif"]`) can match differently in the snapshot. Links keep their original `href` for this reason, so relative links in a snapshot opened from disk don't lead back to the site unless "absolute links" is on.
 
 ## Roadmap
 

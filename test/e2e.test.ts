@@ -65,6 +65,7 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
           imgLoaded: img.complete && img.naturalWidth > 0,
           field: (document.querySelector("#field") as HTMLInputElement).value,
           banner: banner ? getComputedStyle(banner).visibility : "removed",
+          relLink: getComputedStyle(document.querySelector("#rel")!).backgroundColor,
         };
       });
       expect(look).toEqual({
@@ -74,6 +75,7 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
         imgLoaded: true,
         field: "typed value",
         banner: "hidden",
+        relLink: "rgba(0, 0, 0, 0)", // not turned red by a[href^="http"]
       });
     } finally {
       await viewer.close();

@@ -167,6 +167,11 @@ export const FIELDS: Field[] = [
   { label: "Include frames", group: "HTML snapshot", ...bool((s) => s.htmlOptions.includeFrames, (s, v) => html(s, "includeFrames", v)) },
   { label: "Minify HTML", group: "HTML snapshot", ...bool((s) => s.htmlOptions.compressHTML, (s, v) => html(s, "compressHTML", v)) },
   {
+    label: "Absolute links",
+    group: "HTML snapshot",
+    ...bool((s) => s.htmlOptions.absoluteLinks, (s, v) => html(s, "absoluteLinks", v)),
+  },
+  {
     label: "Max resource size",
     group: "HTML snapshot",
     show: (s) => (s.htmlOptions.maxResourceSizeMB ? `${s.htmlOptions.maxResourceSizeMB}MB` : "no limit"),

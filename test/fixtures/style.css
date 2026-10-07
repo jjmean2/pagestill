@@ -1,3 +1,5 @@
 body { font-family: sans-serif; margin: 16px; }
 .ext { color: rgb(0, 128, 0); }
+/* Like pgr21.com: flag links that point off-site. Relative links must not match in the snapshot either. */
+a[href^="http"] { background-color: rgb(255, 0, 0); }
 .cookie-banner { position: fixed; bottom: 0; left: 0; right: 0; background: #c00; color: #fff; padding: 8px; }
