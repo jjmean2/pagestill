@@ -1,0 +1,395 @@
+# pagestill help (target, v0.4 draft)
+
+> Status: **draft for review.** This is the help text pagestill should print after the cleanup
+> described in [concept.md](concept.md). Text inside code blocks is what users see verbatim.
+> Notes for reviewers are in quote blocks like this one.
+
+---
+
+## `pagestill --help`
+
+```
+Usage: pagestill [options] [command]
+
+Capture the page you're looking at, exactly as it is: screenshots and single-file
+HTML snapshots from a live Chrome session.
+
+With no command, opens the interactive screen. Browse and log in in the pagestill
+Chrome window, then press ⏎ in the terminal (or Alt+Shift+S in the page).
+
+Commands:
+  shot [options]           capture the current tab now
+  run <list> [options]     capture every page in a page list
+  crawl [url] [options]    build a page list by following links
+  edit <list>              choose which pages of a list to capture
+  browser <command>        open the pagestill Chrome, list its tabs
+  help [topic]             settings | lists | keys | browser
+
+Capture options (also for shot, run, crawl --capture):
+  -p, --preset <names>     start from saved presets, e.g. retina,dark
+  -o, --out <dir>          workspace folder (default: ./pagestill-out)
+  --viewport <WxH|as-is>   e.g. 1440x900, 390x844m (m = mobile)
+  --dpr <n|as-is>          device pixel ratio, e.g. 2
+  --theme <light|dark|as-is>
+  --area <viewport|full|element>
+  --element <css>          capture one element (sets --area element)
+  --format <png|jpeg|webp>
+  --no-image, --no-html    save only one of the two
+  ...                      every setting has a flag: pagestill help settings
+
+Browser options (all commands):
+  --port <n>               DevTools port (default: 9222)
+  --auto-connect           use your everyday Chrome (experimental)
+  ...                      pagestill help browser
+
+Examples:
+  pagestill                              interactive
+  pagestill shot --viewport 390x844m --dpr 3
+  pagestill crawl https://admin.acme.com --scope /admin
+  pagestill run pagestill-out/lists/admin-acme-com-20261014-141500.pages.yaml
+
+Files: ./pagestill-out/{shots,lists,runs}  ·  config: ~/.pagestill/config.yaml
+```
+
+> The root help shows the 8 most-used capture flags and points to `help settings` for the
+> other 16, instead of printing all 24 plus 6 browser flags as it does today.
+
+---
+
+## `pagestill shot --help`
+
+```
+Usage: pagestill shot [options]
+
+Capture the current tab once and exit. The tab is the one the pagestill Chrome
+window has in front, unless --tab picks another.
+
+Options:
+  --tab <n|text>     tab number from `pagestill browser tabs`, or part of its URL/title
+  (capture options)  pagestill help settings
+  (browser options)  pagestill help browser
+
+Output:
+  pagestill-out/shots/<name>.png and .html; the paths are printed on stdout.
+
+Examples:
+  pagestill shot
+  pagestill shot --no-html --format webp --quality 85
+  pagestill shot --element '#chart' --tab dashboard
+  pagestill shot --preset mobile,dark -o ~/captures
+```
+
+> `shot` no longer depends on what the TUI did last time. Same flags, same result.
+
+---
+
+## `pagestill run --help`
+
+```
+Usage: pagestill run <list> [options]
+
+Open every page of a page list in its own window and capture it, once per
+matrix combination. Results go to a new run folder with a gallery.
+
+Arguments:
+  list                   a .pages.yaml file (see: pagestill help lists)
+
+Options:
+  -c, --concurrency <n>  pages captured in parallel (default: from the list, else 1)
+  --resume <run-dir>     continue a previous run; finished captures are kept
+  --only <glob>          capture only pages whose URL or name matches
+  (capture options)      override the list's settings for this run
+  (browser options)
+
+While running:
+  A page that lands on a login screen pauses every window and asks you to log in
+  (⏎ continue · s skip page · q stop). Pages that answer with an HTTP error, end
+  on a different URL, or show a different title than when listed are marked
+  "check" instead of "ok".
+
+Output:
+  pagestill-out/runs/<list>-<time>/
+    index.html       gallery
+    manifest.json    status of every capture (used by --resume)
+    <page>/<variant>.png|.html
+
+Exit status: 0 all ok · 2 something failed, was skipped or needs checking
+
+Examples:
+  pagestill run admin.pages.yaml
+  pagestill run admin.pages.yaml --viewport 390x844m --theme dark
+  pagestill run admin.pages.yaml --resume pagestill-out/runs/admin-20261014-143000
+```
+
+> New: capture flags on `run`, `--only`, and the "check" status.
+
+---
+
+## `pagestill crawl --help`
+
+```
+Usage: pagestill crawl [url] [options]
+
+Follow links in your logged-in browser and write a page list. Pages that share a
+URL pattern (/users/42, /users/7 → /users/:id) are sampled, not all visited.
+
+Arguments:
+  url                    where to start (default: the current tab)
+
+Options:
+  -d, --depth <n>        link hops from the start page (default: 3)
+  -m, --max <n>          pages to visit at most (default: 200)
+  -s, --sample <n>       pages kept per URL pattern (default: 1)
+  --scope <path>         only follow URLs under this path
+  --include <globs...>   only follow matching URLs, e.g. '/admin/**'
+  --exclude <globs...>   never follow matching URLs
+  --sitemap              also start from /sitemap.xml
+  --login <text|/re/>    URLs that mean "logged out" (default: auto-detect)
+  -c, --concurrency <n>  pages loaded in parallel (default: 2)
+  --save <file>          where to write the list (default: see Output)
+  --capture              capture every visited page too (like run)
+  --follow-unsafe        also follow logout/delete/download links (careful)
+  (capture options)      used with --capture
+  (browser options)
+
+Never followed unless --follow-unsafe: logout, sign-out, delete, remove,
+destroy, unsubscribe, and file downloads (.pdf, .zip, images, ...).
+
+Output:
+  pagestill-out/lists/<host>-<time>.pages.yaml   (path printed on stdout)
+  with --capture, also pagestill-out/runs/<host>-<time>/
+
+Examples:
+  pagestill crawl
+  pagestill crawl https://admin.acme.com --scope /admin --depth 2
+  pagestill crawl https://acme.com --include '/docs/**' --capture --viewport 1280x800
+  pagestill run "$(pagestill crawl https://acme.com)"
+```
+
+> Renamed: `-o <file>` → `--save <file>` (`-o` is always the workspace folder),
+> `--login-pattern` → `--login`, `--no-default-excludes` → `--follow-unsafe`. New: `--capture`.
+
+---
+
+## `pagestill edit --help`
+
+```
+Usage: pagestill edit <list>
+
+Tick which pages of a page list to capture. Unticked pages stay in the file with
+`skip: true`; comments and formatting are kept.
+
+Keys:
+  ↑ ↓ / j k     move               space   tick / untick
+  g             tick / untick the whole pattern group
+  a             tick all / untick all
+  E             open the file in $EDITOR, reload when it closes
+  w             save               q       quit (asks if unsaved)
+```
+
+> Changed: `a` toggles all (today `a` = all, `n` = none; `n` meant something else in other views).
+
+---
+
+## `pagestill browser --help`
+
+```
+Usage: pagestill browser <command>
+
+The Chrome that pagestill reads from. By default pagestill starts its own Chrome
+with a separate profile (~/.pagestill/chrome-profile) where your logins persist,
+or attaches to it if it's already running.
+
+Commands:
+  open [url]     open the pagestill Chrome (and a URL), then exit
+  tabs           list its tabs; ★ = the tab `shot` would capture
+
+Browser options (accepted by every command):
+  --port <n>         DevTools port (default: 9222)
+  --ws <url>         connect to this DevTools WebSocket URL
+  --auto-connect     use your everyday Chrome. Turn on remote debugging at
+                     chrome://inspect/#remote-debugging and allow the prompt.
+                     On macOS your terminal app needs Full Disk Access.
+  --no-launch        fail instead of starting Chrome
+  --chrome <path>    Chrome executable (or $PAGESTILL_CHROME)
+  --profile <dir>    profile folder for the pagestill Chrome
+
+Environment:
+  PAGESTILL_CHROME_ARGS   extra flags for the launched Chrome, e.g. --proxy-server=...
+```
+
+> `pagestill open` and `pagestill tabs` keep working in v0.4 as aliases (with a notice).
+
+---
+
+## `pagestill help settings`
+
+```
+Settings decide how a page is captured. Every setting can be given as a flag,
+in config.yaml (defaults: / presets:), in a page list (settings:), or changed in
+the interactive screen (e).
+
+Later sources win:
+  built-in → config defaults → presets → list settings → page settings
+  → matrix → flags
+
+  FLAG                       YAML KEY             DEFAULT          SCREEN KEY
+Save
+  --[no-]image               image                true             o
+  --[no-]html                html                 true             o
+Emulate
+  --viewport <WxH[m]|as-is>  viewport             as-is            v  V
+  --dpr <n|as-is>            dpr                  as-is            d  D
+  --theme <light|dark|as-is> theme                as-is            m
+  --[no-]reduced-motion      reducedMotion        false
+Prepare
+  --delay <ms>               delay                0                w  W
+  --hide <css...>            hide                 []               x  X
+  --[no-]lazy-load           lazyLoad             false            l
+  --[no-]freeze-animations   freezeAnimations     true
+  --[no-]hide-scrollbars     hideScrollbars       true
+Image
+  --area <viewport|full|element>  area            full             a
+  --element <css>            element              ""               A
+  --format <png|jpeg|webp>   format               png              f
+  --quality <1-100>          quality              90               F
+  --[no-]transparent         transparent          false
+HTML snapshot
+  --html-engine <id>         htmlEngine           singlefile
+  --[no-]html-scripts        htmlScripts          false
+  --[no-]html-remove-hidden  htmlRemoveHidden     false
+  --[no-]html-remove-unused-css  htmlRemoveUnusedCss  true
+  --[no-]html-frames         htmlFrames           true
+  --[no-]html-minify         htmlMinify           true
+  --[no-]html-absolute-links htmlAbsoluteLinks    false
+  --html-max-resource-mb <n> htmlMaxResourceMb    10  (0 = no limit)
+Files
+  -o, --out <dir>            out                  ./pagestill-out
+  --name <template>          name                 {date}-{time}_{host}_{slug}
+      variables: {date} {time} {host} {slug} {title} {w} {h} {dpr}; "/" makes folders
+
+Presets:
+  -p, --preset <a,b>         apply saved presets in order (later wins)
+  Saved in ~/.pagestill/config.yaml:
+    presets:
+      mobile-dark: { viewport: 390x844m, dpr: 3, theme: dark }
+```
+
+> SCREEN KEY: lowercase cycles values, uppercase types a value. Settings without a key are
+> changed in the full settings view (`e`).
+
+---
+
+## `pagestill help lists`
+
+```
+A page list (*.pages.yaml) says what to capture. Make one with
+`pagestill crawl`, with Record (r) in the interactive screen, or by hand.
+Only `pages:` is required.
+
+  base: https://admin.acme.com/
+  pages:
+    - /dashboard
+    - /users
+
+Everything else is optional:
+
+  name: admin-review           # run folder name (default: file name)
+  base: https://admin.acme.com/
+  preset: retina               # presets applied first
+  settings:                    # any setting (pagestill help settings)
+    hide: [".cookie-banner"]
+  matrix:                      # every page × every combination
+    viewport: [1440x900, 390x844m]
+    theme: [light, dark]
+    dpr: [1, 2]
+  load:                        # how to wait after opening a page
+    until: networkidle         # load | domcontentloaded | networkidle
+    waitFor: "main"            # CSS selector that must be visible
+    timeout: 30s
+  login: /sso/                 # URLs that mean "logged out" (text or /regex/)
+  concurrency: 2
+  pages:
+    - /dashboard
+    - url: /reports?range=30d
+      name: reports-30d        # folder name (default: from the URL)
+      load: { waitFor: ".chart canvas" }
+      settings: { area: viewport }
+      steps:                   # run after loading, before capturing
+        - click: "button[aria-controls=billing]"
+        - type: { into: "#q", text: "hello" }
+        - press: Escape
+        - hover: ".menu"
+        - waitFor: "#billing-panel"
+        - wait: 300ms
+        - scroll: bottom       # top | bottom | CSS selector
+        - eval: "document.body.classList.add('print')"
+    - url: /legacy
+      skip: true               # keep in the list, don't capture
+
+Comments written by crawl/record (titles, "/users/:id — 480 URLs found",
+"reached by clicking") are notes only.
+```
+
+> Renamed: `wait:` → `load:` (`selector` → `waitFor`, `delay` moves to the `delay` setting),
+> `actions:` → `steps:`, `type.selector` → `type.into`, `loginPattern:` → `login:`.
+> Durations accept `300ms` / `30s` as well as plain milliseconds.
+
+---
+
+## `pagestill help keys` (also `?` in the interactive screen)
+
+```
+Interactive screen
+
+  ⏎            capture now (what "Save" says: image, HTML or both)
+  t            choose tab · follow the tab in front
+  r            Record: collect pages you visit into a page list (r again to save)
+  u            Auto: capture after every navigation
+  e            all settings
+  p            presets: load, save current as…
+  g            open the workspace folder
+  ?            this help
+  q            quit
+
+  Settings shown on screen: lowercase cycles, Shift types a value
+    o Save         v V Viewport    d D DPR        m Theme
+    w W Delay      x X Hide        l Lazy load
+    a A Area/element               f F Format/quality
+
+In the browser
+  Alt+Shift+S  capture the tab you're on
+
+Lists and views (same everywhere)
+  ↑ ↓ / j k  move     ← →  change     ⏎  select / edit     esc  back
+```
+
+> Changes from today: `s`/`h` (image only / HTML only) removed. Set "Save" with `o` instead,
+> so ⏎ is the only capture key. Open folder moves from `O` to `g`, so every Shift+key now
+> means "type a value". `F` types the quality. Shift on a setting without typed values
+> (e.g. `M`) shows a hint instead of doing nothing.
+
+---
+
+## Interactive screen (target layout)
+
+```
+ pagestill 0.4.0 · Chrome (pagestill) · following the tab in front      ? help
+ ─────────────────────────────────────────────────────────────────────────────
+ Users – Acme Admin
+ https://admin.acme.com/users?page=2
+ ─────────────────────────────────────────────────────────────────────────────
+ SAVE      o image + HTML                    MODES   r Record   off
+ EMULATE   v 1440×900   d 2x   m dark                u Auto     off
+ PREPARE   w 500ms      x .cookie-banner   l lazy load off
+ IMAGE     a full page  f png
+ preset: retina (changed)   ·   restored last session · R reset
+ ─────────────────────────────────────────────────────────────────────────────
+ RECENT  → pagestill-out/shots/
+   ✓ 20261014-142011_admin-acme-com_users.png 2880×9970 3.1MB · .html 841KB
+ ─────────────────────────────────────────────────────────────────────────────
+ ⏎ capture   t tab   r record   u auto   e settings   p presets   g folder   q quit
+```
+
+> Settings are grouped by the same names as `help settings`. Record and Auto get their own
+> status column instead of living only in the footer. The footer fits 80 columns.
