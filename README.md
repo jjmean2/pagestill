@@ -5,15 +5,15 @@ Capture the page you're looking at, exactly as it is right now:
 - **Screenshots** (PNG / JPEG / WebP) of the viewport, the full page, or one element, at any viewport size and pixel density.
 - **HTML snapshots**: one self-contained `.html` file holding the current DOM, styles, images, fonts and frames. Open it anywhere, offline, and the page looks the same.
 
-pagestill doesn't load URLs itself. It attaches to a Chrome window **you** drive, so it captures pages behind logins, client-side rendering, opened menus, typed-in forms, and anything else that only exists in your live session.
+pagestill doesn't open URLs on its own to take a picture. It attaches to a Chrome window **you** drive, so it captures pages behind logins, client-side rendering, opened menus, typed-in forms, and anything else that only exists in your live session. When you want many pages, it can also visit a list of URLs for you in that same logged-in browser.
 
 ## Install
 
 ```sh
-pnpm add -g pagestill     # or: npm i -g pagestill
+pnpm add -g https://github.com/jjmean2/pagestill/releases/download/v0.3.0/pagestill-0.3.0.tgz
 ```
 
-Requires Node 22+ and Google Chrome (or Chromium / Edge / Brave).
+Pick the latest version on the [releases page](https://github.com/jjmean2/pagestill/releases). Requires Node 22+ and Google Chrome (or Chromium / Edge / Brave).
 
 ## Quick start
 
@@ -21,235 +21,239 @@ Requires Node 22+ and Google Chrome (or Chromium / Edge / Brave).
 pagestill
 ```
 
-1. pagestill opens a Chrome window with its own profile (`~/.pagestill/chrome-profile`) and remote debugging on port 9222. Logins you make there are kept for next time.
+1. pagestill opens a Chrome window with its own profile (`~/.pagestill/chrome-profile`). Logins you make there are kept for next time.
 2. Browse to the page you want, log in, click around until it looks right.
 3. Press **⏎** in the terminal, or **Alt+Shift+S** in the page.
 
-Files go to `./pagestill-out/` (`20261005-140211_admin-acme-com_users.png` + `.html`).
+Files go to `./pagestill-out/shots/`. pagestill follows the tab you're looking at; press `t` to pin one.
 
-pagestill follows whichever tab you're looking at. Press `t` to pin a specific tab instead.
+## Five ideas
 
-## The TUI
-
-```
-pagestill v0.1.0 ● launched Chrome · tab: follows focus
-────────────────────────────────────────────────────────────────
-Users – Acme Admin
-https://admin.acme.com/users?page=2
-────────────────────────────────────────────────────────────────
-[o] Output   image + HTML   [m] Theme    as-is    [l] Lazy-load scroll off
-[v] Viewport 1440×900       [w] Wait     500ms    [a] Area     full page
-[d] DPR      2x             [x] Hide     .cookie  [f] Format   png
-lowercase key cycles · Shift+key types a value · e for all settings
-────────────────────────────────────────────────────────────────
-RECENT
-  ✓ …_users.html 841KB · …_users.png 2880×9970 3.1MB 2.0s
-────────────────────────────────────────────────────────────────
-⏎ capture  s image  h html  t tab  e settings  p presets  O folder  q quit
-```
-
-| Key | |
+| | |
 |---|---|
-| `⏎` / `s` / `h` | capture image + HTML / image only / HTML only |
-| `v` `d` `m` `w` `a` `f` `o` `l` | cycle viewport, DPR, theme, wait, area, format, outputs, lazy-load |
-| `V` `D` `W` `A` `X` (Shift) | type a value: `1366x768`, `390x844m` (mobile), `1.5`, a CSS selector… |
-| `e` | every setting, including HTML snapshot options and the filename template |
-| `p` | presets: `n` saves the current settings, `⏎` loads one |
-| `t` | pick a tab, or go back to following focus |
-| `r` | Record mode: collect every page you open, then save the list as a job file |
-| `u` | auto-capture: capture after every navigation once the page settles |
-| `O` | open the output folder |
+| **Browser** | The Chrome pagestill reads from. By default its own window and profile; it can also attach to one you started. |
+| **Capture** | Saving the current screen as an image and/or an HTML snapshot. |
+| **Settings** | *How* to capture: viewport, DPR, theme, format, elements to hide… Named sets are **presets**. |
+| **Page list** | *What* to capture: a `*.pages.yaml` file of URLs (made by crawling, recording, or by hand). |
+| **Run** | Capturing every page of a list, in every combination you ask for, into one folder with a gallery. |
 
-Viewport, DPR and theme are **applied live** to the tab, so the browser shows what will be captured. Overrides are removed when you switch tabs, set them back to `as-is`, or quit. If pagestill crashes, Chrome drops them on its own.
+Three ways to capture:
+
+| | who opens the page | use it for | result |
+|---|---|---|---|
+| **Shot** (`⏎`, `pagestill shot`) | you | this screen, right now, in whatever state it's in | `shots/` |
+| **Auto** (`u` in the screen) | you | capture as you browse | `shots/` |
+| **Run** (`pagestill run`) | pagestill | the same pages again and again, in many variants | `runs/<run>/` |
+
+Shot and Auto capture the live state, including things only clicking gets you to. Run reopens each URL, so it can repeat itself, but a state that isn't in the URL (an open modal, a selected tab) needs `steps:` in the page list.
+
+## The interactive screen
+
+```
+ pagestill 0.4.0 · Chrome (pagestill) · following the tab in front      ? help
+ ─────────────────────────────────────────────────────────────────────────────
+ Users – Acme Admin
+ https://admin.acme.com/users?page=2
+ ─────────────────────────────────────────────────────────────────────────────
+ SAVE      o image + HTML                              MODES   r Record off
+ EMULATE   v 1440×900   d 2x   m dark                          u Auto off
+ PREPARE   w 500ms   x .cookie-banner   l lazy load off
+ IMAGE     a full page   f png
+ preset: retina (changed)   ·   restored last session · R reset
+ ─────────────────────────────────────────────────────────────────────────────
+ RECENT → pagestill-out/shots/
+   ✓ 20261014-142011_admin-acme-com_users.png 2880×9970 3.1MB · .html 841KB
+ ─────────────────────────────────────────────────────────────────────────────
+   ⏎ capture   t tab   r record   u auto   e settings   p presets   g folder   q quit
+```
+
+- Lowercase keys cycle a setting, **Shift** types a value: `v`/`V` viewport, `d`/`D` DPR, `w`/`W` delay, `x`/`X` elements to hide, `a`/`A` area/element, `f`/`F` format/quality, `m` theme, `l` lazy load, `o` what to save.
+- `e` shows every setting, `p` loads or saves presets, `?` lists all keys (`pagestill help keys`).
+- Viewport, DPR and theme are **applied live** to the tab, so the browser shows what will be captured.
+- The screen remembers your last session (only what you changed there, never command-line flags); `R` resets. Nothing else reads that memory: `shot` and `run` behave the same however you left the screen.
 
 ## One-shot CLI
 
 ```sh
-pagestill shot                                   # active tab, current settings
+pagestill shot                                   # current tab, your defaults
 pagestill shot --viewport 390x844m --dpr 3 --no-html
-pagestill shot --selector '#chart' --format webp --quality 85
-pagestill shot --theme dark --hide '.cookie-banner' '#intercom' -o shots/
-pagestill shot --tab 2                           # or --tab admin.acme  (URL/title substring)
-pagestill tabs                                   # list tabs; ★ = what `shot` would capture
-pagestill crawl / edit / run                     # many pages: see below
-pagestill open https://admin.acme.com            # just open the pagestill Chrome
+pagestill shot --element '#chart' --format webp --quality 85
+pagestill shot --theme dark --hide .cookie-banner '#intercom' -o ~/captures
+pagestill shot --tab 2                           # or --tab admin.acme (URL/title text)
+pagestill browser tabs                           # ★ = what `shot` would capture
+pagestill browser open https://admin.acme.com    # just open the pagestill Chrome
 ```
 
-Extra Chrome flags for the launched browser can be passed with `PAGESTILL_CHROME_ARGS` (e.g. `--proxy-server=...`).
+Every setting is a flag; see `pagestill help settings`.
 
-Connection flags work with every command: `--port`, `--no-launch`, `--chrome <path>`, `--profile <dir>`, `--ws <endpoint>`, and `--auto-connect`.
+## Many pages
 
-### Using your everyday Chrome (`--auto-connect`, experimental)
-
-1. In Chrome (144+), open `chrome://inspect/#remote-debugging` and turn remote debugging on. Chrome shows `Server running at: 127.0.0.1:<port>`.
-2. Run `pagestill --auto-connect` and click **Allow** when Chrome asks.
-
-The port Chrome shows is not enough on its own. In this mode Chrome doesn't answer the usual discovery requests (`/json/version` returns 404), so `--port <that port>` can't work. pagestill reads the full address from the `DevToolsActivePort` file in Chrome's profile folder instead. **On macOS your terminal app needs Full Disk Access to read that file** (System Settings → Privacy & Security → Full Disk Access). Without it, pagestill tells you the read was blocked.
-
-If that's more setup than you want, the default mode (pagestill opens its own Chrome with a persistent profile) needs none of it.
-
-## Many pages at once
-
-Three ways to build a page list, all producing the same editable YAML job file:
-
-| | |
-|---|---|
-| **Record** | press `r` in the TUI and browse; every page you open (including client-side routes) is added. Press `r` again to save. |
-| **Crawl** | `pagestill crawl` follows links in your logged-in browser and writes the list for you |
-| **By hand** | write the YAML yourself |
-
-Then pick pages with `pagestill edit` and capture them with `pagestill run`.
-
-### Crawl
+Make a page list, pick the pages, run it:
 
 ```sh
-pagestill crawl                                  # start from the active tab
-pagestill crawl https://admin.acme.com --depth 3 --max 300 --scope /admin
-pagestill crawl https://acme.com --include '/docs/**' --exclude '/docs/archive/**' --sitemap
+pagestill crawl https://admin.acme.com --scope /admin     # → pagestill-out/lists/admin-acme-com-<time>.pages.yaml
+pagestill edit pagestill-out/lists/admin-acme-com-*.pages.yaml
+pagestill run  pagestill-out/lists/admin-acme-com-*.pages.yaml --viewport 390x844m
 ```
 
-- Runs in the pagestill Chrome, so it sees what you see: logged-in areas and links rendered by JavaScript (including inside open shadow roots).
-- URLs are de-duplicated: fragments and tracking params (`utm_*`, `gclid`, ...) are dropped and the query is sorted.
-- Pages are grouped by URL pattern: `/users/42` and `/users/7` both belong to `/users/:id`. Only `--sample` pages per pattern are visited and listed (default 1). This keeps a 10,000-row table from becoming 10,000 screenshots.
-- **Logout, delete/remove, unsubscribe and file-download links are never followed.** Use `--no-default-excludes` only if you really mean it.
-- If a page redirects to a login screen, the crawl pauses and asks you to log in in the browser window.
+**Crawl** follows links in your logged-in browser, reading the rendered DOM (so client-side menus count). URLs that share a pattern (`/users/42`, `/users/7` → `/users/:id`) are sampled instead of all visited. Logout, delete, unsubscribe and download links are never followed unless `--follow-unsafe`. If a page lands on a login screen, the crawl pauses until you log in. Add `--capture` to capture every visited page as you go.
 
-Output (`pages-<host>-<time>.yaml`):
+**Record** (`r` in the screen) writes down every page you open in the tab in front, including client-side route changes, and saves them to a page list. Saving into an existing list adds the new pages and keeps everything else. Pages reached by clicking inside an app are marked `reached in-page`; check that they open directly before relying on them in a run.
 
-```yaml
-# Generated by pagestill crawl https://admin.acme.com on 2026-10-05 23:15
-# 41 pages visited, 912 URLs in 41 patterns.
-base: https://admin.acme.com/
-settings: {}
-pages:
-  - /dashboard # Dashboard – Acme Admin
-  # /users/:id — 480 URLs found
-  - /users/1042 # Jane Doe – Users
-  - url: /billing
-    skip: true # login required
+**Edit** is a checklist over a list: `space` ticks a page, `g` a whole pattern group, `a` all/none, `E` opens `$EDITOR`. Unticked pages stay in the file with `skip: true`, comments intact.
+
+**Run** opens every page in its own background window, once per combination, and writes:
+
+```
+pagestill-out/runs/<list>-<time>/
+  index.html      gallery with thumbnails
+  manifest.json   status of every capture; --resume continues from it
+  <page>/<variant>.png|.html
 ```
 
-### Edit
+Each capture is **ok**, **check** (it answered with an HTTP error or ended on a different URL, so look at it), **failed** or **skipped**. A login wall pauses every window and asks you to log in. Flags override the list for one run, and a flag replaces the matching matrix axis (`--theme dark` on a light/dark matrix captures dark only). `--only '/settings/**'` runs part of a list. The exit code is 2 unless everything is ok.
 
-```sh
-pagestill edit pages-admin.acme.com-20261005-231500.yaml
-```
-
-A checklist over the job file: `space` toggles a page, `g` toggles a whole pattern group, `a`/`n` select all/none, `E` opens it in `$EDITOR`, `w` saves. Unchecked pages get `skip: true`, and comments and formatting are kept.
-
-### Run
-
-```sh
-pagestill run pages.yaml                         # → pagestill-out/pages-20261005-232000/
-pagestill run pages.yaml -c 3                    # 3 windows in parallel
-pagestill run pages.yaml --resume pagestill-out/pages-20261005-232000
-```
-
-The job file can do more than list URLs:
+A page list in full (`pagestill help lists`):
 
 ```yaml
 name: admin-review
 base: https://admin.acme.com/
-preset: retina                 # from ~/.pagestill/config.yaml
-settings:                      # any setting from the table below
-  hideSelectors: [".intercom-launcher", "#cookie-banner"]
-  html: false
-matrix:                        # every page × every combination
+preset: retina
+settings:
+  hide: [".intercom-launcher", "#cookie-banner"]
+matrix:
   viewport: [1440x900, 390x844m]
   theme: [light, dark]
-wait:                          # applies to all pages; overridable per page
-  until: networkidle           # load | domcontentloaded | networkidle
-  delay: 500
-loginPattern: /sso/            # final URLs that mean "logged out" (substring or /regex/)
+load:
+  until: networkidle
+  waitFor: main
+login: /sso/
 concurrency: 2
 pages:
   - /dashboard
   - url: /reports?range=30d
-    name: reports-30d          # folder name (default: from the URL)
-    wait: { selector: ".chart canvas" }
+    name: reports-30d
+    load: { waitFor: ".chart canvas" }
   - url: /settings
-    actions:                   # run after load, before capture
+    steps:
       - click: "button[aria-controls=billing]"
       - waitFor: "#billing-panel"
-      - press: Escape          # also: type, hover, wait (ms), scroll, eval
   - url: /legacy
     skip: true
 ```
 
-Each run writes `<page>/<variant>.png|.html` (variant = matrix combination, e.g. `1440x900.dark`), a `manifest.json` that is updated after every capture, and an **`index.html` gallery** with thumbnails. When a page lands on a login screen, all workers pause, the window comes to the front, and you choose: continue after logging in, skip the page, or stop. Interrupted or failed runs continue with `--resume`. Finished captures are not redone. The exit code is 2 if anything failed or was skipped.
-
 ## Settings
 
-| Setting | Default | |
-|---|---|---|
-| Output | image + HTML | |
-| Viewport | as-is | the real window, or emulated `WxH` (+ mobile/touch) |
-| DPR | as-is | device pixel ratio, e.g. 2 for retina-quality images |
-| Theme | as-is | emulate `prefers-color-scheme: light / dark` |
-| Reduced motion | off | emulate `prefers-reduced-motion` |
-| Wait | 0ms | delay after applying emulation |
-| Hide | none | selectors set to `visibility:hidden` in both outputs |
-| Lazy-load scroll | off | scroll to the bottom and back before capturing |
-| Freeze animations | on | pause CSS animations/transitions, hide the caret |
-| Hide scrollbars | on | |
-| Area | full page | viewport / full page / element (selector) |
-| Format, quality | png, 90 | png / jpeg / webp |
-| Transparent background | off | png / webp |
-| HTML: keep scripts | off | scripts replayed over a frozen DOM usually break it |
-| HTML: remove hidden elements | off | smaller files, but menus/tabs that are closed are dropped |
-| HTML: remove unused CSS | on | |
-| HTML: include frames | on | including cross-origin iframes |
-| HTML: max resource size | 10MB | |
-| HTML: absolute links | off | rewrite relative `href`s to absolute URLs so links in a saved file lead to the site. Off because it can change the look: rules like `a[href^="http"]` would then match links they didn't match live |
-| Output folder, filename | `pagestill-out`, `{date}-{time}_{host}_{slug}` | also `{title} {w} {h} {dpr}`; `/` creates folders |
+Settings are the same everywhere, under the same names:
 
-Last-used settings and presets are stored in `~/.pagestill/config.yaml`. Set `PAGESTILL_HOME` to change the location.
+| where | form | example |
+|---|---|---|
+| config file, page lists | YAML key | `lazyLoad: true` |
+| command line | flag | `--lazy-load` |
+| interactive screen | label | Lazy load |
+
+They are applied in one order, later wins:
+
+```
+built-in → config defaults → presets → page list → page → matrix → flags
+```
+
+`pagestill help settings` lists all 24 with their flags, keys and defaults: what to save (image, HTML), emulation (viewport, DPR, theme, reduced motion), preparation (delay, hide, lazy load, freeze animations, hide scrollbars), the image (area, element, format, quality, transparent), the HTML snapshot (scripts, hidden elements, unused CSS, frames, minify, absolute links, resource size) and files (workspace folder, file name template).
+
+`~/.pagestill/config.yaml`:
 
 ```yaml
-presets:
-  mobile-dark:
-    viewport: { width: 390, height: 844, mobile: true }
-    dpr: 3
-    theme: dark
+defaults:                 # every command starts from these
+  format: webp
+presets:                  # --preset retina,dark (later wins)
+  retina: { dpr: 2 }
+  dark: { theme: dark }
+  mobile: { viewport: 390x844m, dpr: 3 }
 browser:
   port: 9222
 ```
+
+## Where files go
+
+Everything pagestill writes goes into one **workspace** folder, `./pagestill-out` unless you set `-o` (or `out:` in your defaults):
+
+```
+pagestill-out/
+  shots/     single captures (Shot, Auto)
+  lists/     page lists (crawl, Record)
+  runs/      runs (run, crawl --capture)
+```
+
+`~/.pagestill/` holds `config.yaml`, the screen's last session (`tui-state.yaml`) and the Chrome profile.
+
+## Browser
+
+By default pagestill starts its own Chrome (separate profile, remote debugging on `127.0.0.1:9222`) or attaches to it if it's running. Browser options work with every command: `--port`, `--ws <url>`, `--no-launch`, `--chrome <path>`, `--profile <dir>`. Extra Chrome flags go in `PAGESTILL_CHROME_ARGS` (e.g. `--proxy-server=...`).
+
+**Your everyday Chrome** (`--auto-connect`, experimental): turn on remote debugging at `chrome://inspect/#remote-debugging` (Chrome 144+), run `pagestill --auto-connect`, and click **Allow** when Chrome asks. The port Chrome shows isn't enough by itself: in this mode Chrome doesn't answer the usual discovery requests, so pagestill reads the full address from the `DevToolsActivePort` file in Chrome's profile. **On macOS your terminal app needs Full Disk Access** to read it (System Settings → Privacy & Security → Full Disk Access).
+
+## Upgrading from 0.3
+
+0.4 renames things so that each setting has one name; the old names keep working, with a warning, until 0.5.
+
+| 0.3 | 0.4 |
+|---|---|
+| job file, `pages-*.yaml` | page list, `*.pages.yaml` |
+| `hideSelectors`, `loadLazy` / `--lazy`, `waitMs` / `--wait` | `hide`, `lazyLoad` / `--lazy-load`, `delay` / `--delay` |
+| `selector` / `--selector`, `omitBackground` | `element` / `--element`, `transparent` |
+| `htmlOptions: { keepScripts, … }`, `--archiver` | `htmlScripts`, … (flat), `--html-engine` |
+| `outDir`, `filename` | `out`, `name` |
+| page list `wait: { selector, delay }`, `actions:`, `loginPattern:`, `type: { selector }` | `load: { waitFor }` + `delay` setting, `steps:`, `login:`, `type: { into }` |
+| `pagestill open`, `pagestill tabs` | `pagestill browser open`, `pagestill browser tabs` |
+| `crawl -o <file>`, `--login-pattern`, `--no-default-excludes` | `crawl --save <file>`, `--login`, `--follow-unsafe` |
+
+Behavior changes:
+
+- `-o` always means the workspace folder. Shots go to `<out>/shots/`, runs to `<out>/runs/`, crawled lists to `<out>/lists/`.
+- `shot` no longer picks up the interactive screen's last settings. Put settings you always want in `defaults:` in `config.yaml`. The 0.3 `settings:` key there is treated as the screen's last session and moved to `tui-state.yaml`.
+- The interactive screen's `s`/`h` (capture image only / HTML only) are gone: choose what to save with `o`, capture with `⏎`. The folder key moved from `O` to `g`.
 
 ## Security notes
 
 - The Chrome that pagestill launches listens for DevTools connections on `127.0.0.1:<port>` (9222 by default) while it runs. Any program on **your machine** can then control that browser, including the sessions you are logged into. It is not reachable from the network. Close that Chrome when you're done if this matters to you, or use a separate OS user.
 - The `~/.pagestill/chrome-profile` profile stores the cookies and logins you make in that window. Treat it like any browser profile.
-- To follow the focused tab, pagestill exposes a small `__pagestillSignal` function to each page. A page could call it to trigger a capture, which writes files to your output folder. It can't do anything else.
+- To follow the focused tab, pagestill exposes a small `__pagestillSignal` function to each page. A page could call it to trigger a capture, which writes files to your workspace folder. It can't do anything else.
 - HTML snapshots inline everything that was on screen, including personal data visible in a logged-in page. Review them before sharing.
 
 ## How it works
 
 ```
 src/
-  cli.ts                 commander entry (TUI / shot / tabs / open)
+  cli.ts                 commands
+  cli/options.ts         flags, generated from the settings registry
+  cli/topics.ts          pagestill help settings | lists | keys
   core/
+    settings.ts          the settings registry: one definition per setting
+    config.ts            config.yaml, presets, the resolution order, TUI state
+    workspace.ts         shots/ lists/ runs/
     chrome.ts            find + launch Chrome (dedicated profile, remote debugging)
     session.ts           attach via puppeteer-core, follow the focused tab, in-page hotkey
     emulation.ts         viewport/DPR/media overrides, capture CSS, lazy-load scroll
     screenshot.ts        CDP screenshots; tall pages are tiled and stitched (sharp)
-    capture.ts           orchestration: HTML first (non-invasive), then the image
-    navigate.ts          wait strategies and page actions
+    capture.ts           HTML first (non-invasive), then the image
+    navigate.ts          load waiting and page steps
     urls.ts              normalization, URL patterns, globs, login detection
   batch/
-    job.ts               job file format, matrix, editable YAML writer
-    runner.ts            workers, login pause, manifest, resume
-    crawler.ts           BFS in the live browser
+    pagelist.ts          page list format, matrix, editable YAML writer
+    runner.ts            run workers, login pause, checks, manifest, resume
+    crawler.ts           breadth-first crawl in the live browser
     gallery.ts           index.html + thumbnails
   archivers/
     types.ts             the Archiver interface
     index.ts             lazy registry
     singlefile/          SingleFile adapter (the only code that knows about SingleFile)
-  tui/                   Ink UI
+  tui/                   Ink screens
+docs/design/             concept guide and target help this version implements
 ```
 
 The HTML snapshot is produced by an **Archiver**: it serializes the live page without reloading it and returns one HTML string. The default engine is [SingleFile](https://github.com/gildas-lormeau/single-file-core). pagestill injects SingleFile's browser bundle into the already-open page, and into its cross-origin iframes, through an isolated world. Resources the page can't fetch because of CORS are fetched again through the browser with your cookies.
 
-To use another engine, add `src/archivers/<id>/index.ts` that exports an `Archiver` and register it in `src/archivers/index.ts`. Then select it with `--archiver <id>` or in the settings.
+To use another engine, add `src/archivers/<id>/index.ts` that exports an `Archiver` and register it in `src/archivers/index.ts`. Then select it with `--html-engine <id>` or in the settings.
 
 ## Known limitations
 
@@ -257,19 +261,21 @@ To use another engine, add `src/archivers/<id>/index.ts` that exports an `Archiv
 - Full-page capture temporarily enlarges the viewport, so `100vh` elements stretch and `position: fixed` elements appear once, at their initial position.
 - The HTML snapshot keeps how the page looks, not how it behaves: no JS, no hover states, and inner scroll positions are reset.
 - WebGL canvases created without `preserveDrawingBuffer` may come out blank in the HTML snapshot.
-- Images, fonts and stylesheets are inlined as `data:` URLs, so CSS that selects on those attributes (e.g. `img[src$=".gif"]`) can match differently in the snapshot. Links keep their original `href` for this reason, so relative links in a snapshot opened from disk don't lead back to the site unless "absolute links" is on.
+- Images, fonts and stylesheets are inlined as `data:` URLs, so CSS that selects on those attributes (e.g. `img[src$=".gif"]`) can match differently in the snapshot. Links keep their original `href` for this reason, so relative links in a snapshot opened from disk don't lead back to the site unless `htmlAbsoluteLinks` is on.
+- Record stores URLs, not clicks. A screen reached only by clicking needs `steps:` in the page list to be reproduced by a run.
 
 ## Roadmap
 
 - Full-page capture of apps that scroll inside an inner container
-- Run jobs from inside the TUI (progress view, login prompt in place)
-- Visual diff between two runs of the same job
+- Run and crawl from inside the interactive screen
+- Record clicks as `steps:`
+- Visual diff between two runs of the same list
 
 ## Releasing
 
 ```sh
-pnpm release patch --dry-run   # preview: checks + "0.2.0 → 0.2.1 (tag v0.2.1)", changes nothing
-pnpm release patch             # or minor | major | 1.2.3 | prerelease --preid rc
+pnpm release patch --dry-run   # preview: checks + "0.3.0 → 0.3.1 (tag v0.3.1)", changes nothing
+pnpm release minor             # or patch | major | 1.2.3 | prerelease --preid rc
 ```
 
 [`scripts/release.mjs`](scripts/release.mjs) does the whole thing:
@@ -279,7 +285,7 @@ pnpm release patch             # or minor | major | 1.2.3 | prerelease --preid r
 3. Runs `pnpm version`, which bumps `package.json`, commits `chore: release x.y.z` and creates the annotated tag `vX.Y.Z`.
 4. Pushes the commit and the tag atomically. The tag triggers the [Release workflow](.github/workflows/release.yml), which tests again, runs `pnpm pack`, and publishes a GitHub Release with the tarball. With `gh` installed, the script follows the run and prints the install command. Set `RELEASE_NO_WATCH=1` to skip that.
 
-Versions with a `-` (e.g. `0.3.0-rc.0`) become prereleases. If the workflow fails, the script prints the commands to move the tag after you push a fix. Running the workflow manually from the Actions tab is a dry run that uploads the tarball as an artifact instead of releasing.
+Versions with a `-` (e.g. `0.4.0-rc.0`) become prereleases. If the workflow fails, the script prints the commands to move the tag after you push a fix. Running the workflow manually from the Actions tab is a dry run that uploads the tarball as an artifact instead of releasing.
 
 ## Development
 
