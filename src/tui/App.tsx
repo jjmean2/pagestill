@@ -1,40 +1,52 @@
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import { basename, join, relative } from "node:path";
 import { Box, Text, useApp, useInput } from "ink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { Page } from "puppeteer-core";
+import { KEYS_TOPIC } from "../cli/topics.js";
+import { LIST_SUFFIX, appendToPageList } from "../batch/pagelist.js";
 import { type CaptureResult, capture } from "../core/capture.js";
-import { type Config, diffFromDefaults, saveConfig } from "../core/config.js";
+import { type Config, saveConfig } from "../core/config.js";
 import { PASSTHROUGH_KEY, applyEmulation, clearEmulation, emulationKey } from "../core/emulation.js";
-import { writeJobFile } from "../batch/job.js";
 import { localDateTime, localStamp } from "../core/filename.js";
 import { formatBytes } from "../core/format.js";
 import { quiet } from "../core/navigate.js";
-import { normalizeUrl } from "../core/urls.js";
 import type { BrowserSession } from "../core/session.js";
-import { type CaptureSettings, mergeSettings, withOutputMode } from "../core/settings.js";
-import { type Field, HOTKEY_FIELDS } from "./fields.js";
+import { type CaptureSettings, DEFAULT_SETTINGS, type SettingsPatch, diffSettings, mergeSettings } from "../core/settings.js";
+import { normalizeUrl } from "../core/urls.js";
+import { setWarningSink } from "../core/warn.js";
+import { workspace } from "../core/workspace.js";
+import { type Field, MAIN_GROUPS, fieldForKey, fixedChoiceField, mainFields } from "./fields.js";
 import { PresetsView } from "./PresetsView.js";
 import { Prompt } from "./Prompt.js";
 import { SettingsView } from "./SettingsView.js";
 import { TabsView } from "./TabsView.js";
 
-type View = "main" | "tabs" | "settings" | "presets";
+type View = "main" | "tabs" | "settings" | "presets" | "help";
 type PromptState = { label: string; hint?: string; initial: string; submit: (text: string) => void };
+type Recorded = { url: string; title: string; inPage?: boolean };
 
 export interface AppProps {
   session: BrowserSession;
-  initialSettings: CaptureSettings;
   config: Config;
   version: string;
-  onSettings: (s: CaptureSettings) => void;
+  /** What R resets to: defaults → config defaults → presets → flags. */
+  base: CaptureSettings;
+  /** Where the screen starts: base plus the restored session. */
+  initial: CaptureSettings;
+  /** Settings restored from the last session (tui-state.yaml). */
+  restored: SettingsPatch;
+  /** Presets given on the command line, for the status line. */
+  presetLabel?: string;
+  /** Called with the session's own changes (never command-line flags) whenever they change. */
+  onSession: (patch: SettingsPatch) => void;
 }
 
-export function App({ session, initialSettings, config, version, onSettings }: AppProps) {
+export function App({ session, config, version, base, initial, restored, presetLabel: startPreset, onSession }: AppProps) {
   const { exit } = useApp();
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const [settings, setSettingsState] = useState(initialSettings);
+  const [settings, setSettingsState] = useState(initial);
   const [view, setView] = useState<View>("main");
   const [prompt, setPrompt] = useState<PromptState>();
   const [settingsCursor, setSettingsCursor] = useState(0);
@@ -42,61 +54,88 @@ export function App({ session, initialSettings, config, version, onSettings }: A
   const [message, setMessage] = useState<{ text: string; error?: boolean }>();
   const [recent, setRecent] = useState<CaptureResult[]>([]);
   const [presets, setPresets] = useState(config.presets ?? {});
+  const [preset, setPreset] = useState<{ label: string; snapshot: string } | undefined>(
+    startPreset ? { label: startPreset, snapshot: JSON.stringify(initial) } : undefined,
+  );
+  const [isRestored, setIsRestored] = useState(Object.keys(restored).length > 0);
   const busyRef = useRef(false);
   const settingsRef = useRef(settings);
+  /** What this session changed: restored state plus edits made here. Saved on exit. */
+  const sessionPatch = useRef<SettingsPatch>({ ...restored });
   /** Emulation key currently applied per page (WYSIWYG: the browser shows what will be captured). */
   const applied = useRef(new Map<Page, string>());
   const emuChain = useRef(Promise.resolve());
-  // Record mode: URLs visited while recording, saved as a job file. Auto-capture: capture after
-  // every navigation once the page has settled.
+  // Record: pages visited in the tab in front, saved to a page list. Auto: capture after every
+  // navigation in the tab in front, once the page has settled.
   const [recording, setRecording] = useState(false);
   const [autoCapture, setAutoCapture] = useState(false);
-  const [recorded, setRecorded] = useState<{ url: string; title: string }[]>([]);
+  const [recorded, setRecorded] = useState<Recorded[]>([]);
   const recordingRef = useRef(false);
   const autoRef = useRef(false);
   const recordedUrls = useRef(new Set<string>());
 
   const setSettings = useCallback(
-    (s: CaptureSettings) => {
-      settingsRef.current = s;
-      setSettingsState(s);
-      onSettings(s);
+    (next: CaptureSettings) => {
+      const prev = settingsRef.current;
+      for (const k of Object.keys(next) as (keyof CaptureSettings)[]) {
+        if (JSON.stringify(prev[k]) !== JSON.stringify(next[k])) (sessionPatch.current as Record<string, unknown>)[k] = next[k];
+      }
+      settingsRef.current = next;
+      setSettingsState(next);
+      onSession({ ...sessionPatch.current });
     },
-    [onSettings],
+    [onSession],
   );
 
   const fail = (e: unknown) => setMessage({ text: e instanceof Error ? e.message : String(e), error: true });
 
+  // Config/list warnings raised while the screen owns the terminal go to the status line.
+  useEffect(() => {
+    setWarningSink((m) => setMessage({ text: m, error: true }));
+    return () => setWarningSink((m) => process.stderr.write(`pagestill: ${m}\n`));
+  }, []);
+
   /** Add a URL to the recording right away (fast clicks must not be lost); the title comes later. */
   function remember(rawUrl: string) {
+    if (!/^(https?|file):/.test(rawUrl)) return;
     const url = normalizeUrl(rawUrl);
     if (!url || recordedUrls.current.has(url)) return;
     recordedUrls.current.add(url);
     setRecorded((r) => [...r, { url, title: "" }]);
   }
 
-  async function fillTitle(page: Page) {
+  /** Title, and whether the page was reached in-page (pushState) rather than loaded at its URL. */
+  async function fillDetails(page: Page) {
     const url = normalizeUrl(page.url());
-    const title = await page.title().catch(() => "");
-    if (url && title) setRecorded((r) => r.map((x) => (x.url === url && !x.title ? { ...x, title } : x)));
+    if (!url) return;
+    const info = await page
+      .evaluate(() => ({
+        title: document.title,
+        loaded: (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined)?.name ?? location.href,
+      }))
+      .catch(() => undefined);
+    if (!info) return;
+    const inPage = normalizeUrl(info.loaded) !== url;
+    setRecorded((r) => r.map((x) => (x.url === url ? { ...x, title: x.title || info.title, inPage: x.inPage ?? inPage } : x)));
   }
 
-  // Navigations drive Record mode and auto-capture (debounced: redirects and SPA route changes
-  // often come in bursts).
+  // Navigations in the tab in front drive Record and Auto (debounced: redirects and SPA route
+  // changes come in bursts). Other windows (run, crawl) never count.
   useEffect(() => {
     const timers = new Map<Page, NodeJS.Timeout>();
     const onNav = (page: Page, url: string) => {
       if (!recordingRef.current && !autoRef.current) return;
-      if (!session.follow && page !== session.active) return;
+      if (page !== session.active) return;
       if (!/^(https?|file):/.test(url)) return;
       if (recordingRef.current) remember(url);
       clearTimeout(timers.get(page));
       timers.set(
         page,
         setTimeout(async () => {
+          if (page !== session.active) return;
           await quiet(page, 500, 8000);
-          if (recordingRef.current) await fillTitle(page);
-          if (autoRef.current) await runCapture(settingsRef.current, page);
+          if (recordingRef.current) await fillDetails(page);
+          if (autoRef.current && page === session.active) await runCapture(settingsRef.current, page);
         }, 700),
       );
     };
@@ -113,40 +152,57 @@ export function App({ session, initialSettings, config, version, onSettings }: A
       setRecording(true);
       if (session.active) {
         remember(session.active.url());
-        void fillTitle(session.active);
+        void fillDetails(session.active);
       }
-      setMessage({ text: "Recording: every page you open in Chrome is added. r again to stop and save." });
+      setMessage({ text: "Recording the tab in front: every page you open is added. r again to stop and save." });
       return;
     }
     recordingRef.current = false;
     setRecording(false);
     if (!recorded.length) return setMessage({ text: "Recording stopped (nothing recorded)" });
     const first = new URL(recorded[0]!.url);
+    const lists = workspace(settingsRef.current.out).lists;
+    const host = (first.hostname || "local").replace(/\./g, "-");
     setPrompt({
       label: `Save ${recorded.length} recorded pages to:`,
-      hint: "esc keeps the list; r resumes recording",
-      initial: `pages-${first.hostname || "local"}-${localStamp()}.yaml`,
+      hint: "an existing list gets the new pages added · esc keeps the recording",
+      initial: show(join(lists, `${host}-${localStamp()}${LIST_SUFFIX}`)),
       submit: (path) => {
         const file = path.trim();
         if (!file) throw new Error("File name is required");
-        writeJobFile(file, {
+        mkdirSync(join(file, ".."), { recursive: true });
+        const added = appendToPageList(file, {
           header: [
             ` Recorded with pagestill on ${localDateTime()}`,
-            " Edit freely (or `pagestill edit`), then: pagestill run <this file>",
+            " Pages marked \"reached in-page\" were opened by clicking inside a page app;",
+            " check that they open directly before relying on them in a run.",
+            " Untick pages with `pagestill edit <this file>`, then: pagestill run <this file>",
           ].join("\n"),
           base: first.protocol === "file:" ? undefined : `${first.origin}/`,
-          entries: recorded.map((r) => ({ url: r.url, note: r.title || undefined })),
+          entries: recorded.map((r) => ({
+            url: r.url,
+            note: [r.title, r.inPage ? "reached in-page" : ""].filter(Boolean).join(" · ") || undefined,
+          })),
         });
         recordedUrls.current.clear();
         setRecorded([]);
-        setMessage({ text: `Saved ${file} · pagestill edit ${file} · pagestill run ${file}` });
+        const skipped = recorded.length - added;
+        setMessage({ text: `Saved ${added} page${added === 1 ? "" : "s"} to ${file}${skipped ? ` (${skipped} already there)` : ""}` });
       },
     });
   }
 
-  // Re-render on tab/focus changes; capture on the in-page hotkey.
+  // Re-render on tab/focus changes; capture on the in-page hotkey; keep recording across tabs.
   useEffect(() => {
-    const onChange = () => rerender();
+    let lastActive = session.active;
+    const onChange = () => {
+      if (recordingRef.current && session.active && session.active !== lastActive) {
+        remember(session.active.url());
+        void fillDetails(session.active);
+      }
+      lastActive = session.active;
+      rerender();
+    };
     const onHotkey = (page: Page) => void runCapture(settingsRef.current, page);
     const onGone = () => {
       setMessage({ text: "Browser disconnected", error: true });
@@ -220,7 +276,7 @@ export function App({ session, initialSettings, config, version, onSettings }: A
     });
   }
 
-  function persistPresets(next: Record<string, Partial<CaptureSettings>>) {
+  function persistPresets(next: Record<string, SettingsPatch>) {
     setPresets(next);
     config.presets = next;
     try {
@@ -230,46 +286,62 @@ export function App({ session, initialSettings, config, version, onSettings }: A
     }
   }
 
+  function reset() {
+    sessionPatch.current = {};
+    settingsRef.current = base;
+    setSettingsState(base);
+    onSession({});
+    setIsRestored(false);
+    setPreset(startPreset ? { label: startPreset, snapshot: JSON.stringify(base) } : undefined);
+    setMessage({ text: "Reset to defaults (config defaults, presets and flags still apply)" });
+  }
+
   useInput(
     (input, key) => {
+      setMessage(undefined);
       if (input === "q") return exit();
       if (key.return) return void runCapture(settings);
-      if (input === "s") return void runCapture(withOutputMode(settings, "image"));
-      if (input === "h") return void runCapture(withOutputMode(settings, "html"));
       if (input === "t") return setView("tabs");
       if (input === "e") return setView("settings");
       if (input === "p") return setView("presets");
-      if (input === "O") return openFolder(settings.outDir);
+      if (input === "?") return setView("help");
+      if (input === "g") return openFolder(workspace(settings.out).root);
+      if (input === "R") return reset();
       if (input === "r") return toggleRecording();
       if (input === "u") {
         autoRef.current = !autoRef.current;
         setAutoCapture(autoRef.current);
-        return setMessage({ text: autoRef.current ? "Auto-capture on: every navigation is captured once it settles" : "Auto-capture off" });
+        return setMessage({ text: autoRef.current ? "Auto on: every page you open in the tab in front is captured" : "Auto off" });
       }
-      const field = HOTKEY_FIELDS.find((f) => f.hotkey === input || f.hotkey?.toUpperCase() === input);
-      if (!field) return;
-      const shifted = input !== field.hotkey;
-      if (shifted || !field.step) return edit(field);
-      setSettings(field.step(settings, 1));
+      const hit = fieldForKey(input);
+      if (hit) {
+        if (hit.typed) return edit(hit.field);
+        if (hit.field.step) return setSettings(hit.field.step(settings, 1));
+      }
+      const fixed = fixedChoiceField(input);
+      if (fixed) setMessage({ text: `${fixed.label} has fixed choices: press ${fixed.key1} to cycle them` });
     },
     { isActive: view === "main" && !prompt },
   );
 
+  useInput(() => setView("main"), { isActive: view === "help" && !prompt });
+
   const tab = session.activeTab;
+  const shots = workspace(settings.out).shots;
+  const presetChanged = preset && preset.snapshot !== JSON.stringify(settings);
 
   return (
     <Box flexDirection="column">
-      <Text>
-        <Text bold color="cyan">
-          pagestill
+      <Box justifyContent="space-between">
+        <Text>
+          <Text bold color="cyan">
+            pagestill
+          </Text>
+          <Text dimColor> {version} · Chrome ({session.launched ? "pagestill" : "attached"}) · </Text>
+          {session.follow ? <Text color="green">following the tab in front</Text> : <Text color="yellow">pinned tab</Text>}
         </Text>
-        <Text dimColor> v{version} </Text>
-        <Text color="green">● </Text>
-        <Text dimColor>{session.launched ? "launched Chrome" : "attached"} · tab: </Text>
-        {session.follow ? <Text color="green">follows focus</Text> : <Text color="yellow">pinned</Text>}
-        {recording ? <Text color="red"> ● REC {recorded.length}</Text> : null}
-        {autoCapture ? <Text color="yellow"> ◉ AUTO</Text> : null}
-      </Text>
+        <Text dimColor>? help</Text>
+      </Box>
       <Rule />
       {tab ? (
         <>
@@ -300,6 +372,11 @@ export function App({ session, initialSettings, config, version, onSettings }: A
             }
           }}
         />
+      ) : view === "help" ? (
+        <Box flexDirection="column">
+          <Text>{KEYS_TOPIC.trimEnd()}</Text>
+          <Text dimColor>any key to go back</Text>
+        </Box>
       ) : view === "tabs" ? (
         <TabsView session={session} onDone={() => setView("main")} />
       ) : view === "settings" ? (
@@ -316,7 +393,9 @@ export function App({ session, initialSettings, config, version, onSettings }: A
           presets={presets}
           onDone={() => setView("main")}
           onLoad={(name) => {
-            setSettings(mergeSettings(settings, presets[name]));
+            const next = mergeSettings(settings, presets[name]);
+            setSettings(next);
+            setPreset({ label: name, snapshot: JSON.stringify(next) });
             setMessage({ text: `Loaded preset "${name}"` });
             setView("main");
           }}
@@ -327,18 +406,27 @@ export function App({ session, initialSettings, config, version, onSettings }: A
           onSaveAs={() =>
             setPrompt({
               label: "Preset name:",
-              initial: "",
+              initial: preset?.label ?? "",
               submit: (name) => {
                 const n = name.trim();
                 if (!n) throw new Error("Name is required");
-                persistPresets({ ...presets, [n]: diffFromDefaults(settings) });
+                // the workspace folder belongs to where you work, not to a preset
+                const { out: _, ...p } = diffSettings(settings, DEFAULT_SETTINGS);
+                persistPresets({ ...presets, [n]: p });
+                setPreset({ label: n, snapshot: JSON.stringify(settings) });
                 setMessage({ text: `Saved preset "${n}"` });
               },
             })
           }
         />
       ) : (
-        <SettingsGrid settings={settings} />
+        <Box flexDirection="column">
+          <SettingsGrid settings={settings} recording={recording} recordedCount={recorded.length} auto={autoCapture} />
+          <Text dimColor>
+            {preset ? `preset: ${preset.label}${presetChanged ? " (changed)" : ""}` : "no preset"}
+            {isRestored ? "   ·   restored last session · R reset" : ""}
+          </Text>
+        </Box>
       )}
 
       {view === "main" && !prompt && (
@@ -348,19 +436,23 @@ export function App({ session, initialSettings, config, version, onSettings }: A
               <Rule />
               <Text dimColor>
                 RECORDED {recorded.length}
-                {recording ? "" : " (paused · r to resume)"}
+                {recording ? "" : " (paused · r to resume and save)"}
               </Text>
               {recorded.slice(-3).map((r) => (
                 <Text key={r.url} wrap="truncate-end">
                   {"  "}
                   {r.url}
-                  <Text dimColor> {r.title}</Text>
+                  <Text dimColor>
+                    {" "}
+                    {r.title}
+                    {r.inPage ? " · reached in-page" : ""}
+                  </Text>
                 </Text>
               ))}
             </>
           )}
           <Rule />
-          <Text dimColor>RECENT</Text>
+          <Text dimColor>RECENT → {show(shots)}/</Text>
           {recent.length === 0 ? (
             <Text dimColor>  nothing yet</Text>
           ) : (
@@ -380,11 +472,20 @@ export function App({ session, initialSettings, config, version, onSettings }: A
         <Text> </Text>
       )}
       {view === "main" && !prompt && (
-        <Text dimColor wrap="wrap">
-          <Text color="white">⏎</Text> capture  <Text color="white">s</Text> image  <Text color="white">h</Text> html  <Text color="white">t</Text> tab  <Text color="white">e</Text> settings  <Text color="white">p</Text> presets  <Text color="white">r</Text> record  <Text color="white">u</Text> auto-capture  <Text color="white">O</Text> folder  <Text color="white">q</Text> quit  · in browser: Alt+Shift+S
+        <Text dimColor wrap="truncate-end">
+          <K k="⏎" /> capture <K k="t" /> tab <K k="r" /> record <K k="u" /> auto <K k="e" /> settings <K k="p" /> presets <K k="g" /> folder <K k="q" /> quit
         </Text>
       )}
     </Box>
+  );
+}
+
+function K({ k }: { k: string }) {
+  return (
+    <Text color="white">
+      {"  "}
+      {k}
+    </Text>
   );
 }
 
@@ -392,24 +493,58 @@ function Rule() {
   return <Text dimColor>{"─".repeat(Math.min(process.stdout.columns || 80, 100))}</Text>;
 }
 
-function SettingsGrid({ settings }: { settings: CaptureSettings }) {
-  const cols = 3;
-  const rows: Field[][] = [];
-  HOTKEY_FIELDS.forEach((f, i) => (rows[i % Math.ceil(HOTKEY_FIELDS.length / cols)] ??= []).push(f));
+/** Main-screen value: area shows the element, format shows the quality when it matters. */
+function mainShow(f: Field, s: CaptureSettings): string {
+  if (f.id === "area" && s.area === "element") return `element ${s.element || "(none: A)"}`;
+  if (f.id === "format" && s.format !== "png") return `${s.format} q${s.quality}`;
+  if (f.id === "lazyLoad") return `lazy load ${s.lazyLoad ? "on" : "off"}`;
+  return f.show(s);
+}
+
+function SettingsGrid({
+  settings,
+  recording,
+  recordedCount,
+  auto,
+}: {
+  settings: CaptureSettings;
+  recording: boolean;
+  recordedCount: number;
+  auto: boolean;
+}) {
+  const modes = [
+    <Text key="r">
+      <Text color="cyan">r</Text> Record {recording ? <Text color="red">on · {recordedCount}</Text> : "off"}
+    </Text>,
+    <Text key="u">
+      <Text color="cyan">u</Text> Auto {auto ? <Text color="yellow">on</Text> : "off"}
+    </Text>,
+  ];
   return (
     <Box flexDirection="column">
-      {rows.map((row, i) => (
-        <Box key={i}>
-          {row.map((f) => (
-            <Box key={f.label} width={32}>
-              <Text wrap="truncate-end">
-                <Text color="cyan">[{f.hotkey}]</Text> {f.label.padEnd(8)} <Text bold>{f.show(settings)}</Text>
-              </Text>
-            </Box>
-          ))}
+      {MAIN_GROUPS.map((g, i) => (
+        <Box key={g.title}>
+          <Box width={10}>
+            <Text dimColor>{g.title}</Text>
+          </Box>
+          <Box width={56}>
+            <Text wrap="truncate-end">
+              {mainFields(g.group)
+                .filter((f) => f.key1)
+                .map((f) => (
+                  <Text key={f.id}>
+                    <Text color="cyan">{f.key1}</Text> <Text bold>{mainShow(f, settings)}</Text>
+                    {"   "}
+                  </Text>
+                ))}
+            </Text>
+          </Box>
+          <Box width={8}>
+            <Text dimColor>{i === 0 ? "MODES" : ""}</Text>
+          </Box>
+          {modes[i] ?? null}
         </Box>
       ))}
-      <Text dimColor>lowercase key cycles · Shift+key types a value · e for all settings</Text>
     </Box>
   );
 }
@@ -426,9 +561,14 @@ function RecentLine({ result }: { result: CaptureResult }) {
   );
 }
 
+/** Relative to cwd when inside it, absolute otherwise. */
+function show(p: string): string {
+  const r = relative(process.cwd(), p);
+  return !r || r.startsWith("..") ? p : r;
+}
+
 function openFolder(dir: string) {
-  const path = resolve(dir);
-  mkdirSync(path, { recursive: true });
+  mkdirSync(dir, { recursive: true });
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open";
-  spawn(cmd, [path], { detached: true, stdio: "ignore" }).unref();
+  spawn(cmd, [dir], { detached: true, stdio: "ignore" }).unref();
 }

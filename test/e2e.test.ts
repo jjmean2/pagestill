@@ -33,8 +33,9 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
   });
 
   it("archives the current DOM state into one self-contained HTML file", async () => {
-    const s = mergeSettings(DEFAULT_SETTINGS, { image: false, outDir: join(tmp, "out"), hideSelectors: [".cookie-banner"] });
+    const s = mergeSettings(DEFAULT_SETTINGS, { image: false, out: join(tmp, "out"), hide: [".cookie-banner"] });
     const res = await capture(session, session.active!, s);
+    expect(res.files[0]!.path).toContain(join(tmp, "out", "shots"));
     const html = readFileSync(res.files[0]!.path, "utf8");
     expect(html).toContain("changed by JS"); // JS-mutated DOM, not the original source
     expect(html).toContain("typed value"); // form state
@@ -85,7 +86,7 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
   }, 60_000);
 
   it("captures a full-page PNG taller than one compositor tile", async () => {
-    const s = mergeSettings(DEFAULT_SETTINGS, { html: false, outDir: join(tmp, "out"), dpr: 2, area: "full" });
+    const s = mergeSettings(DEFAULT_SETTINGS, { html: false, out: join(tmp, "out"), dpr: 2, area: "full" });
     const res = await capture(session, session.active!, s);
     const img = res.files[0]!;
     expect(img.kind).toBe("image");
@@ -99,7 +100,7 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
   it("captures viewport-only JPEG at an emulated viewport", async () => {
     const s = mergeSettings(DEFAULT_SETTINGS, {
       html: false,
-      outDir: join(tmp, "out"),
+      out: join(tmp, "out"),
       viewport: { width: 800, height: 600 },
       dpr: 1,
       area: "viewport",

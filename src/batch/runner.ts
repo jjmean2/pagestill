@@ -1,18 +1,20 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { Page } from "puppeteer-core";
-import { capture } from "../core/capture.js";
-import type { Config } from "../core/config.js";
+import { type CaptureResult, capture } from "../core/capture.js";
+import { type Config, resolveSettings } from "../core/config.js";
 import { applyEmulation, emulationKey, settle } from "../core/emulation.js";
 import { localStamp, slugify } from "../core/filename.js";
-import { gotoAndWait, runActions } from "../core/navigate.js";
+import { type NavigationResult, gotoAndWait, runSteps } from "../core/navigate.js";
 import type { BrowserSession } from "../core/session.js";
-import { type CaptureSettings, DEFAULT_SETTINGS, mergeSettings } from "../core/settings.js";
-import { isLoginRedirect } from "../core/urls.js";
+import { type SettingKey, type SettingsPatch, mergeSettings } from "../core/settings.js";
+import { isLoginRedirect, normalizeUrl } from "../core/urls.js";
+import { workspace } from "../core/workspace.js";
 import { writeGallery, writeThumbnail } from "./gallery.js";
-import { type Job, type ResolvedPage, type Variant, resolvePages, variants } from "./job.js";
+import { type PageList, type ResolvedPage, type Variant, resolvePages, variants } from "./pagelist.js";
 
-export type EntryStatus = "ok" | "failed" | "skipped";
+/** ok: captured · check: captured, but the page may not be the one listed · failed · skipped */
+export type EntryStatus = "ok" | "check" | "failed" | "skipped";
 
 export interface ManifestEntry {
   key: string;
@@ -22,6 +24,8 @@ export interface ManifestEntry {
   status: EntryStatus;
   finalUrl?: string;
   title?: string;
+  /** Why the entry needs checking (HTTP error, ended on another URL). */
+  checks?: string[];
   /** Paths relative to the run folder. */
   files: { kind: "image" | "html"; path: string; bytes: number; width?: number; height?: number }[];
   warnings: string[];
@@ -34,8 +38,9 @@ export interface ManifestEntry {
 
 export interface Manifest {
   version: 1;
-  job?: string;
-  jobName: string;
+  /** Page list the run came from. */
+  list?: string;
+  listName: string;
   startedAt: string;
   updatedAt: string;
   entries: Record<string, ManifestEntry>;
@@ -43,28 +48,21 @@ export interface Manifest {
 
 export type LoginDecision = "retry" | "skip" | "abort";
 
+export interface RunSummary {
+  runDir: string;
+  ok: number;
+  check: number;
+  failed: number;
+  skipped: number;
+  aborted: boolean;
+}
+
 export type RunEvent =
   | { type: "start"; runDir: string; total: number; alreadyDone: number }
   | { type: "task"; page: string; variant: string; url: string; worker: number }
   | { type: "entry"; entry: ManifestEntry; done: number; total: number }
   | { type: "info"; message: string }
-  | { type: "done"; runDir: string; ok: number; failed: number; skipped: number; aborted: boolean };
-
-export interface RunOptions {
-  session: BrowserSession;
-  job: Job;
-  jobPath?: string;
-  config: Config;
-  /** Resume into this run folder (entries already "ok" are skipped). */
-  runDir?: string;
-  concurrency?: number;
-  onEvent: (e: RunEvent) => void;
-  /**
-   * Called when a page landed on a login screen. The batch window is brought to the front;
-   * every worker waits until this resolves.
-   */
-  onLogin: (info: { url: string; finalUrl: string }) => Promise<LoginDecision>;
-}
+  | ({ type: "done" } & RunSummary);
 
 const MANIFEST = "manifest.json";
 
@@ -72,58 +70,153 @@ export function entryKey(page: string, variant: string): string {
   return `${page}/${variant}`;
 }
 
-export function baseSettings(job: Job, config: Config): CaptureSettings {
-  let s = mergeSettings(DEFAULT_SETTINGS, undefined);
-  if (job.preset) {
-    const p = config.presets?.[job.preset];
-    if (!p) throw new Error(`Unknown preset "${job.preset}"`);
-    s = mergeSettings(s, p);
-  }
-  return mergeSettings(s, job.settings);
-}
-
 export function readManifest(runDir: string): Manifest | undefined {
   const path = join(runDir, MANIFEST);
-  return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Manifest) : undefined;
+  if (!existsSync(path)) return undefined;
+  const m = JSON.parse(readFileSync(path, "utf8")) as Manifest & { jobName?: string; job?: string };
+  // runs made before 0.4 called the list a "job"
+  m.listName ??= m.jobName ?? "run";
+  m.list ??= m.job;
+  return m;
 }
 
-function writeManifest(runDir: string, m: Manifest) {
-  m.updatedAt = new Date().toISOString();
-  const tmp = join(runDir, `${MANIFEST}.tmp`);
-  writeFileSync(tmp, JSON.stringify(m, null, 2));
-  renameSync(tmp, join(runDir, MANIFEST));
+/**
+ * A run folder: manifest.json (rewritten after every capture, so a run can be resumed),
+ * thumbnails and the index.html gallery. Shared by `run` and `crawl --capture`.
+ */
+export class RunWriter {
+  readonly manifest: Manifest;
+
+  constructor(
+    readonly dir: string,
+    init: { list?: string; listName: string },
+  ) {
+    mkdirSync(dir, { recursive: true });
+    this.manifest = readManifest(dir) ?? {
+      version: 1,
+      list: init.list,
+      listName: init.listName,
+      startedAt: new Date().toISOString(),
+      updatedAt: "",
+      entries: {},
+    };
+  }
+
+  /** Finished captures (ok or check) are kept when resuming. */
+  isDone(key: string): boolean {
+    const s = this.manifest.entries[key]?.status;
+    return s === "ok" || s === "check";
+  }
+
+  has(key: string): boolean {
+    return key in this.manifest.entries;
+  }
+
+  async record(entry: ManifestEntry): Promise<ManifestEntry> {
+    const image = entry.files.find((f) => f.kind === "image");
+    if (image && entry.status !== "failed") {
+      const thumb = join(".thumbs", `${entry.key.replace(/\//g, "--")}.jpg`);
+      await writeThumbnail(join(this.dir, image.path), join(this.dir, thumb))
+        .then(() => (entry.thumb = thumb))
+        .catch(() => {});
+    }
+    this.manifest.entries[entry.key] = entry;
+    this.save();
+    return entry;
+  }
+
+  /** Turn a capture into a manifest entry (paths relative to the run folder). */
+  entryFrom(
+    base: Pick<ManifestEntry, "key" | "page" | "url" | "variant">,
+    res: CaptureResult,
+    nav: { finalUrl: string; checks: string[]; warnings: string[] },
+    started: number,
+  ): ManifestEntry {
+    return {
+      ...base,
+      status: nav.checks.length ? "check" : "ok",
+      finalUrl: nav.finalUrl,
+      title: res.title,
+      checks: nav.checks.length ? nav.checks : undefined,
+      files: res.files.map((f) => ({ ...f, path: relative(this.dir, f.path) })),
+      warnings: [...nav.warnings, ...res.warnings],
+      durationMs: Date.now() - started,
+      at: new Date().toISOString(),
+    };
+  }
+
+  save(): void {
+    this.manifest.updatedAt = new Date().toISOString();
+    const tmp = join(this.dir, `${MANIFEST}.tmp`);
+    writeFileSync(tmp, JSON.stringify(this.manifest, null, 2));
+    renameSync(tmp, join(this.dir, MANIFEST));
+  }
+
+  finish(aborted: boolean): RunSummary {
+    this.save();
+    writeGallery(this.dir, this.manifest);
+    const list = Object.values(this.manifest.entries);
+    const count = (s: EntryStatus) => list.filter((e) => e.status === s).length;
+    return { runDir: this.dir, ok: count("ok"), check: count("check"), failed: count("failed"), skipped: count("skipped"), aborted };
+  }
 }
 
-export async function runJob(opts: RunOptions): Promise<{ runDir: string; manifest: Manifest }> {
-  const { session, job, onEvent } = opts;
-  const base = baseSettings(job, opts.config);
-  const pages = resolvePages(job);
-  const vars = variants(job.matrix);
-  if (!pages.length) throw new Error("The job has no pages to capture (all skipped?)");
+/** Reasons a loaded page may not be the one that was asked for. */
+export function navigationChecks(requested: string, nav: NavigationResult): string[] {
+  const checks: string[] = [];
+  if (nav.status !== undefined && nav.status >= 400) checks.push(`HTTP ${nav.status}`);
+  const a = normalizeUrl(requested);
+  const b = normalizeUrl(nav.finalUrl);
+  if (a && b && a !== b) checks.push(`ended on ${nav.finalUrl}`);
+  return checks;
+}
 
-  const runDir = resolve(opts.runDir ?? join(job.out ?? base.outDir, `${slugify(job.name ?? "job") || "job"}-${localStamp()}`));
-  mkdirSync(runDir, { recursive: true });
-  const manifest: Manifest = readManifest(runDir) ?? {
-    version: 1,
-    job: opts.jobPath ? resolve(opts.jobPath) : undefined,
-    jobName: job.name ?? "job",
-    startedAt: new Date().toISOString(),
-    updatedAt: "",
-    entries: {},
-  };
+export interface RunOptions {
+  session: BrowserSession;
+  list: PageList;
+  listPath?: string;
+  config: Config;
+  /** Presets from the command line, applied after the list's own presets. */
+  presets?: string[];
+  /** Settings from command-line flags: override the list (and replace matrix axes they set). */
+  flags?: SettingsPatch;
+  /** Only pages whose URL path or name match this glob. */
+  only?: string;
+  /** Resume into this run folder (finished captures are kept). */
+  runDir?: string;
+  concurrency?: number;
+  onEvent: (e: RunEvent) => void;
+  /**
+   * Called when a page landed on a login screen. That window is brought to the front;
+   * every worker waits until this resolves.
+   */
+  onLogin: (info: { url: string; finalUrl: string }) => Promise<LoginDecision>;
+}
+
+export async function runPageList(opts: RunOptions): Promise<RunSummary & { manifest: Manifest }> {
+  const { session, list, onEvent } = opts;
+  const flags = opts.flags ?? {};
+  const presets = [...list.presets, ...(opts.presets ?? [])];
+  const base = resolveSettings(opts.config, presets, list.settings, flags);
+  const pages = resolvePages(list, opts.only);
+  const vars = variants(list.matrix, new Set(Object.keys(flags) as SettingKey[]));
+  if (!pages.length) {
+    throw new Error(opts.only ? `No page in the list matches --only ${opts.only}` : "The list has no pages to capture (all skipped?)");
+  }
+
+  const runDir = resolve(opts.runDir ?? join(workspace(base.out).runs, `${slugify(list.name) || "run"}-${localStamp()}`));
+  const writer = new RunWriter(runDir, { list: opts.listPath ? resolve(opts.listPath) : undefined, listName: list.name });
   const total = pages.length * vars.length;
-  const isDone = (p: ResolvedPage, v: Variant) => manifest.entries[entryKey(p.name, v.id)]?.status === "ok";
-  let done = pages.reduce((n, p) => n + vars.filter((v) => isDone(p, v)).length, 0);
+  let done = pages.reduce((n, p) => n + vars.filter((v) => writer.isDone(entryKey(p.name, v.id))).length, 0);
   onEvent({ type: "start", runDir, total, alreadyDone: done });
 
-  const queue = pages.filter((p) => vars.some((v) => !isDone(p, v)));
+  const queue = pages.filter((p) => vars.some((v) => !writer.isDone(entryKey(p.name, v.id))));
   let aborted = false;
   let loginPending: Promise<LoginDecision> | undefined;
-
   const skipReason = () => (aborted ? "aborted" : "login required");
-  const record = (entry: ManifestEntry) => {
-    manifest.entries[entry.key] = entry;
-    writeManifest(runDir, manifest);
+
+  const record = async (entry: ManifestEntry) => {
+    await writer.record(entry);
     done++;
     onEvent({ type: "entry", entry, done, total });
   };
@@ -136,26 +229,29 @@ export async function runJob(opts: RunOptions): Promise<{ runDir: string; manife
     return loginPending;
   }
 
-  /** Navigate (with emulation already applied), handling login walls. Returns false to skip the page. */
-  async function open(page: Page, p: ResolvedPage): Promise<{ ok: boolean; finalUrl: string; warnings: string[] }> {
+  /** Navigate (with emulation already applied), handling login walls. */
+  async function open(page: Page, p: ResolvedPage): Promise<{ ok: boolean; finalUrl: string; checks: string[]; warnings: string[] }> {
     for (let attempt = 0; ; attempt++) {
       while (loginPending) await loginPending.catch(() => {});
-      if (aborted) return { ok: false, finalUrl: p.url, warnings: [] };
-      const nav = await gotoAndWait(page, p.url, p.wait);
-      if (isLoginRedirect(p.url, nav.finalUrl, job.loginPattern)) {
+      if (aborted) return { ok: false, finalUrl: p.url, checks: [], warnings: [] };
+      const nav = await gotoAndWait(page, p.url, p.load);
+      if (isLoginRedirect(p.url, nav.finalUrl, list.login)) {
         if (attempt >= 3) throw new Error(`still redirected to login (${nav.finalUrl})`);
         const decision = await login(page, p.url, nav.finalUrl);
         if (decision === "abort") aborted = true;
-        if (decision !== "retry") return { ok: false, finalUrl: nav.finalUrl, warnings: [] };
+        if (decision !== "retry") return { ok: false, finalUrl: nav.finalUrl, checks: [], warnings: [] };
         continue;
       }
-      if (p.actions.length) await runActions(page, p.actions);
-      return { ok: true, finalUrl: nav.finalUrl, warnings: nav.warnings };
+      const checks = navigationChecks(p.url, nav);
+      if (p.steps.length) await runSteps(page, p.steps);
+      return { ok: true, finalUrl: nav.finalUrl, checks, warnings: nav.warnings };
     }
   }
 
   async function worker(index: number) {
-    const page = await session.browser.newPage({ type: "window" });
+    // In the background: a focused window would pull the interactive screen's "follow the
+    // tab in front" (and Record/Auto) over to the run.
+    const page = await session.browser.newPage({ type: "window", background: true });
     const cdp = await session.cdp(page);
     let applied: string | undefined;
     try {
@@ -163,48 +259,35 @@ export async function runJob(opts: RunOptions): Promise<{ runDir: string; manife
         let opened: Awaited<ReturnType<typeof open>> | undefined;
         for (const v of vars) {
           if (aborted) break;
-          if (isDone(p, v)) continue;
+          const key = entryKey(p.name, v.id);
+          if (writer.isDone(key)) continue;
           onEvent({ type: "task", page: p.name, variant: v.id, url: p.url, worker: index });
-          const settings = mergeSettings(mergeSettings(base, p.settings), v.patch);
-          settings.outDir = runDir;
-          settings.filename = `${p.name}/${v.id}`;
+          // list → page → matrix → flags
+          const settings = mergeSettings(base, p.settings, v.patch, flags);
           const started = Date.now();
-          const entry: Omit<ManifestEntry, "status"> = {
-            key: entryKey(p.name, v.id),
-            page: p.name,
-            url: p.url,
-            variant: v.id,
-            files: [],
-            warnings: [],
-            durationMs: 0,
-            at: "",
-          };
+          const head = { key, page: p.name, url: p.url, variant: v.id };
+          let entry: ManifestEntry | undefined;
           let error: unknown;
           for (let attempt = 0; attempt < 2; attempt++) {
             try {
               // Emulate before loading so responsive JS sees the right viewport from the start.
-              const key = emulationKey(settings);
-              if (applied !== key) {
+              const ek = emulationKey(settings);
+              if (applied !== ek) {
                 await applyEmulation(cdp, settings);
-                applied = key;
-                if (opened && !job.reload) await settle(page, 300);
+                applied = ek;
+                if (opened && !list.reload) await settle(page, 300);
               }
-              if (!opened || job.reload || attempt > 0) {
+              if (!opened || list.reload || attempt > 0) {
                 opened = await open(page, p);
                 if (!opened.ok) break;
               }
-              const res = await capture(session, page, settings, { keepEmulation: true, appliedEmulation: applied });
-              entry.finalUrl = opened.finalUrl;
-              entry.title = res.title;
-              entry.warnings = [...opened.warnings, ...res.warnings];
-              entry.files = res.files.map((f) => ({ ...f, path: relative(runDir, f.path) }));
-              const image = res.files.find((f) => f.kind === "image");
-              if (image) {
-                const thumb = join(".thumbs", `${p.name}--${v.id}.jpg`);
-                await writeThumbnail(image.path, join(runDir, thumb))
-                  .then(() => (entry.thumb = thumb))
-                  .catch(() => {});
-              }
+              const res = await capture(session, page, settings, {
+                keepEmulation: true,
+                appliedEmulation: applied,
+                dir: runDir,
+                name: `${p.name}/${v.id}`,
+              });
+              entry = writer.entryFrom(head, res, opened, started);
               error = undefined;
               break;
             } catch (e) {
@@ -212,20 +295,27 @@ export async function runJob(opts: RunOptions): Promise<{ runDir: string; manife
               opened = undefined;
             }
           }
-          const status: EntryStatus = error ? "failed" : opened?.ok === false ? "skipped" : "ok";
-          record({
-            ...entry,
+          if (entry) {
+            await record(entry);
+            continue;
+          }
+          const status: EntryStatus = error ? "failed" : "skipped";
+          await record({
+            ...head,
             status,
-            finalUrl: entry.finalUrl ?? opened?.finalUrl,
-            error: error ? (error instanceof Error ? error.message : String(error)) : status === "skipped" ? skipReason() : undefined,
+            finalUrl: opened?.finalUrl,
+            files: [],
+            warnings: [],
+            error: error ? (error instanceof Error ? error.message : String(error)) : skipReason(),
             durationMs: Date.now() - started,
             at: new Date().toISOString(),
           });
           if (status === "skipped") {
             // the whole page is unreachable; don't try its other variants
             for (const rest of vars) {
-              if (rest.id !== v.id && !manifest.entries[entryKey(p.name, rest.id)] && !aborted) {
-                record({ ...entry, key: entryKey(p.name, rest.id), variant: rest.id, status, error: skipReason(), durationMs: 0, at: new Date().toISOString() });
+              const k = entryKey(p.name, rest.id);
+              if (k !== key && !writer.has(k) && !aborted) {
+                await record({ ...head, key: k, variant: rest.id, status, files: [], warnings: [], error: skipReason(), durationMs: 0, at: new Date().toISOString() });
               }
             }
             break;
@@ -237,19 +327,10 @@ export async function runJob(opts: RunOptions): Promise<{ runDir: string; manife
     }
   }
 
-  const n = Math.max(1, Math.min(opts.concurrency ?? job.concurrency ?? 1, queue.length || 1));
+  const n = Math.max(1, Math.min(opts.concurrency ?? list.concurrency ?? 1, queue.length || 1));
   await Promise.all(Array.from({ length: n }, (_, i) => worker(i)));
 
-  writeManifest(runDir, manifest);
-  writeGallery(runDir, manifest);
-  const list = Object.values(manifest.entries);
-  onEvent({
-    type: "done",
-    runDir,
-    ok: list.filter((e) => e.status === "ok").length,
-    failed: list.filter((e) => e.status === "failed").length,
-    skipped: list.filter((e) => e.status === "skipped").length,
-    aborted,
-  });
-  return { runDir, manifest };
+  const summary = writer.finish(aborted);
+  onEvent({ type: "done", ...summary });
+  return { ...summary, manifest: writer.manifest };
 }

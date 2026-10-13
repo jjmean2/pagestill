@@ -56,9 +56,9 @@ export async function settle(page: Page, extraMs = 150): Promise<void> {
 
 const STYLE_ID = "__pagestill-capture-style";
 
-export function captureCss(s: Pick<CaptureSettings, "hideSelectors" | "freezeAnimations" | "hideScrollbars">): string {
+export function captureCss(s: Pick<CaptureSettings, "hide" | "freezeAnimations" | "hideScrollbars">): string {
   const rules: string[] = [];
-  for (const sel of s.hideSelectors.map((x) => x.trim()).filter(Boolean)) {
+  for (const sel of s.hide.map((x) => x.trim()).filter(Boolean)) {
     rules.push(`${sel}{visibility:hidden!important}`);
   }
   if (s.freezeAnimations) {
@@ -99,7 +99,7 @@ export async function prepareDom(page: Page, s: CaptureSettings): Promise<() => 
       STYLE_ID,
     );
   }
-  if (s.loadLazy) await scrollThrough(page);
+  if (s.lazyLoad) await scrollThrough(page);
   return async () => {
     if (!css) return;
     await page

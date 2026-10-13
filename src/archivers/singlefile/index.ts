@@ -7,7 +7,7 @@
  */
 import type { CDPSession, Page } from "puppeteer-core";
 import type { Archiver, ArchiveResult } from "../types.js";
-import type { HtmlOptions } from "../../core/settings.js";
+import type { HtmlOptions } from "../types.js";
 import { toSingleFileOptions } from "./options.js";
 
 const WORLD = "pagestill:singlefile";
@@ -240,7 +240,7 @@ const singleFileArchiver: Archiver = {
 
       ctx.log?.("Injecting SingleFile");
       await injectIntoTarget(session, source, frameTree.frame.id, userAgent);
-      if (options.includeFrames) await injectIntoOopifs(session, source, userAgent, children, warnings);
+      if (options.frames) await injectIntoOopifs(session, source, userAgent, children, warnings);
       const contextId = await topContextId(session, source);
 
       ctx.log?.("Serializing page");

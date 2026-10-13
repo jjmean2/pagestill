@@ -1,8 +1,8 @@
 import type { Page } from "puppeteer-core";
-import { gotoAndWait, type WaitSpec } from "../core/navigate.js";
+import { type LoadSpec, type NavigationResult, gotoAndWait } from "../core/navigate.js";
 import type { BrowserSession } from "../core/session.js";
 import { DEFAULT_EXCLUDES, isLoginRedirect, matchesAnyGlob, normalizeUrl, urlPattern } from "../core/urls.js";
-import type { JobFileEntry } from "./job.js";
+import type { ListEntry } from "./pagelist.js";
 import type { LoginDecision } from "./runner.js";
 
 export interface CrawlOptions {
@@ -19,14 +19,19 @@ export interface CrawlOptions {
   /** Never follow URLs matching these globs (added to the built-in safety list). */
   exclude?: string[];
   /** Drop the built-in exclusions (logout, delete, files...). */
-  noDefaultExcludes?: boolean;
+  followUnsafe?: boolean;
   /** Only follow URLs under this path prefix (default: the whole origin). */
   scope?: string;
   /** Also seed the queue from /sitemap.xml. */
   sitemap?: boolean;
-  wait?: WaitSpec;
+  load?: LoadSpec;
   concurrency?: number;
-  loginPattern?: string;
+  /** Final URLs matching this (text or /regex/) mean "logged out". */
+  login?: string;
+  /** Called once per worker window before it loads anything (e.g. to apply emulation). */
+  onWindow?: (page: Page) => Promise<void>;
+  /** Called for every page visited in scope, while it is still open (e.g. to capture it). */
+  onPage?: (page: Page, visited: CrawledPage, nav: NavigationResult) => Promise<void>;
   onLogin: (info: { url: string; finalUrl: string }) => Promise<LoginDecision>;
   onEvent?: (e: CrawlEvent) => void;
 }
@@ -67,8 +72,8 @@ export async function crawl(o: CrawlOptions): Promise<CrawlResult> {
   const maxDepth = o.maxDepth ?? 3;
   const maxPages = o.maxPages ?? 200;
   const sample = Math.max(1, o.sample ?? 1);
-  const excludes = [...(o.noDefaultExcludes ? [] : DEFAULT_EXCLUDES), ...(o.exclude ?? [])];
-  const wait: WaitSpec = { until: "networkidle", timeout: 20_000, ...o.wait };
+  const excludes = [...(o.followUnsafe ? [] : DEFAULT_EXCLUDES), ...(o.exclude ?? [])];
+  const load: LoadSpec = { until: "networkidle", timeout: 20_000, ...o.load };
 
   const seen = new Set<string>();
   const discovered = new Map<string, string[]>();
@@ -114,8 +119,8 @@ export async function crawl(o: CrawlOptions): Promise<CrawlResult> {
     const pattern = urlPattern(url);
     for (let attempt = 0; ; attempt++) {
       while (loginPending) await loginPending.catch(() => {});
-      const nav = await gotoAndWait(page, url, wait);
-      if (isLoginRedirect(url, nav.finalUrl, o.loginPattern)) {
+      const nav = await gotoAndWait(page, url, load);
+      if (isLoginRedirect(url, nav.finalUrl, o.login)) {
         const decision = attempt < 3 ? await login(page, url, nav.finalUrl) : "skip";
         if (decision === "abort") aborted = true;
         if (decision === "retry") continue;
@@ -128,7 +133,15 @@ export async function crawl(o: CrawlOptions): Promise<CrawlResult> {
       if (finalUrl !== url) seen.add(finalUrl);
       const { title, links } = await page.evaluate(collectLinks);
       for (const l of links) enqueue(l, depth + 1);
-      return { url, finalUrl, depth, title, pattern, status: "ok", links: links.length };
+      const visited: CrawledPage = { url, finalUrl, depth, title, pattern, status: "ok", links: links.length };
+      if (o.onPage) {
+        try {
+          await o.onPage(page, visited, nav);
+        } catch (e) {
+          visited.error = `capture failed: ${e instanceof Error ? e.message : String(e)}`;
+        }
+      }
+      return visited;
     }
   }
 
@@ -145,7 +158,9 @@ export async function crawl(o: CrawlOptions): Promise<CrawlResult> {
   }
 
   async function worker(first: boolean) {
-    const page = await o.session.browser.newPage({ type: "window" });
+    // In the background, so the interactive screen keeps following the user's tab.
+    const page = await o.session.browser.newPage({ type: "window", background: true });
+    await o.onWindow?.(page);
     try {
       if (first && o.sitemap) await seedSitemap(page);
       for (;;) {
@@ -219,8 +234,8 @@ function collectLinks(): { title: string; links: string[] } {
  * saying how many URLs share it. Pages that failed or needed login are included as `skip: true`
  * so they're easy to re-enable.
  */
-export function crawlEntries(r: CrawlResult): JobFileEntry[] {
-  const entries: JobFileEntry[] = [];
+export function crawlEntries(r: CrawlResult): ListEntry[] {
+  const entries: ListEntry[] = [];
   const byPattern = new Map<string, CrawledPage[]>();
   for (const p of [...r.pages].sort((a, b) => a.depth - b.depth)) {
     if (p.status === "redirected") continue;

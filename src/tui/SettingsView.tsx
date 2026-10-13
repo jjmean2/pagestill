@@ -1,4 +1,4 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useWindowSize } from "ink";
 import type { CaptureSettings } from "../core/settings.js";
 import { FIELDS, type Field } from "./fields.js";
 
@@ -15,7 +15,13 @@ export interface SettingsViewProps {
   setCursor: (update: (c: number) => number) => void;
 }
 
+type Row = { header: string } | { field: Field; index: number };
+
+/** Rows taken by the screen around this view (title, tab, rules, status, footer). */
+const CHROME_ROWS = 10;
+
 export function SettingsView({ settings, onChange, onEdit, onDone, cursor, setCursor }: SettingsViewProps) {
+  const { rows: termRows } = useWindowSize();
   const field = FIELDS[cursor]!;
   useInput((input, key) => {
     if (key.escape || input === "e" || input === "q") return onDone();
@@ -29,27 +35,40 @@ export function SettingsView({ settings, onChange, onEdit, onDone, cursor, setCu
     }
   });
 
+  const rows: Row[] = [];
   let lastGroup = "";
+  FIELDS.forEach((f, index) => {
+    if (f.group !== lastGroup) rows.push({ header: f.group });
+    lastGroup = f.group;
+    rows.push({ field: f, index });
+  });
+  // Scroll so the selection stays visible on short terminals.
+  const visible = Math.max(6, (termRows || 24) - CHROME_ROWS - 2);
+  const at = rows.findIndex((r) => "field" in r && r.index === cursor);
+  const top = Math.min(Math.max(0, at - Math.floor(visible / 2)), Math.max(0, rows.length - visible));
+  const keys = (f: Field) => [f.key1, f.keyType].filter(Boolean).join(" ");
+
   return (
     <Box flexDirection="column">
-      <Text bold>Settings</Text>
-      {FIELDS.map((f, i) => {
-        const header = f.group !== lastGroup ? f.group : undefined;
-        lastGroup = f.group;
-        return (
-          <Box key={f.label} flexDirection="column">
-            {header && <Text color="cyan">{header}</Text>}
-            <Text inverse={i === cursor} wrap="truncate-end">
-              {"  "}
-              {f.label.padEnd(24)}
-              {f.show(settings)}
-              {f.hotkey ? <Text dimColor>{`  [${f.hotkey}]`}</Text> : null}
-            </Text>
-          </Box>
-        );
-      })}
+      <Text bold>
+        Settings <Text dimColor>({cursor + 1}/{FIELDS.length})</Text>
+      </Text>
+      {rows.slice(top, top + visible).map((r, i) =>
+        "header" in r ? (
+          <Text key={`h${top + i}`} color="cyan">
+            {r.header}
+          </Text>
+        ) : (
+          <Text key={r.field.id} inverse={r.index === cursor} wrap="truncate-end">
+            {"  "}
+            {r.field.label.padEnd(20)}
+            {r.field.show(settings)}
+            {keys(r.field) ? <Text dimColor>{`  [${keys(r.field)}]`}</Text> : null}
+          </Text>
+        ),
+      )}
       <Text dimColor>
-        ↑↓ move · ←→/space change{field.edit ? " · ⏎ edit" : ""} · esc back
+        ↑↓ move · ←→/space change{field.edit ? " · ⏎ type a value" : ""} · esc back
       </Text>
     </Box>
   );

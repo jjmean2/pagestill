@@ -31,7 +31,7 @@ export function writeGallery(runDir: string, m: Manifest): void {
     list.push(e);
     byPage.set(e.page, list);
   }
-  const counts = { ok: 0, failed: 0, skipped: 0 };
+  const counts = { ok: 0, check: 0, failed: 0, skipped: 0 };
   for (const e of Object.values(m.entries)) counts[e.status]++;
 
   const rows = [...byPage].map(([page, entries]) => {
@@ -51,6 +51,8 @@ export function writeGallery(runDir: string, m: Manifest): void {
           .filter(Boolean)
           .join(" · ");
         return `<figure class="${e.status}">${thumb}<figcaption><b>${esc(e.variant)}</b> ${links}${
+          e.checks?.length ? `<div class="check">check: ${esc(e.checks.join("; "))}</div>` : ""
+        }${
           e.warnings.length ? `<div class="warn">${esc(e.warnings.join("; "))}</div>` : ""
         }</figcaption></figure>`;
       })
@@ -62,7 +64,7 @@ export function writeGallery(runDir: string, m: Manifest): void {
 
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(m.jobName)} · pagestill</title>
+<title>${esc(m.listName)} · pagestill</title>
 <style>
 :root{--bg:#fff;--fg:#1d1d1f;--muted:#6e6e73;--card:#f5f5f7;--line:#e3e3e8;--bad:#c62828;--warn:#9a6700}
 @media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#ececf0;--muted:#9a9aa2;--card:#1e1e22;--line:#2c2c32;--bad:#ff6b6b;--warn:#e3b341}}
@@ -74,9 +76,9 @@ figure{margin:0;background:var(--card);border:1px solid var(--line);border-radiu
 .thumb{display:block;height:260px;overflow:hidden;background:var(--line)}.thumb img{width:100%;display:block}
 .thumb.empty{display:grid;place-items:center;color:var(--muted);padding:12px;text-align:center}
 figcaption{padding:8px 10px;color:var(--muted)}figcaption b{color:var(--fg)}
-.failed{border-color:var(--bad)}.failed .thumb{color:var(--bad)}.warn{color:var(--warn);font-size:12px;margin-top:4px}
+.check{border-color:var(--warn)}div.check{color:var(--warn);font-size:12px;margin-top:4px;font-weight:600}.failed{border-color:var(--bad)}.failed .thumb{color:var(--bad)}.warn{color:var(--warn);font-size:12px;margin-top:4px}
 </style></head><body>
-<header><h1>${esc(m.jobName)}</h1><p class="meta">${counts.ok} ok · ${counts.failed} failed · ${counts.skipped} skipped · started ${esc(
+<header><h1>${esc(m.listName)}</h1><p class="meta">${counts.ok} ok · ${counts.check} to check · ${counts.failed} failed · ${counts.skipped} skipped · started ${esc(
     new Date(m.startedAt).toLocaleString(),
   )}</p></header>
 ${rows.join("\n")}

@@ -1,9 +1,19 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import YAML from "yaml";
-import { loadJob, pageName, resolvePages, setSkipped, variants, writeJobFile } from "../src/batch/job.js";
+import {
+  appendToPageList,
+  loadPageList,
+  pageName,
+  parsePageList,
+  resolvePages,
+  setSkipped,
+  variants,
+  writePageList,
+} from "../src/batch/pagelist.js";
+import { navigationChecks } from "../src/batch/runner.js";
 import { DEFAULT_EXCLUDES, isLoginRedirect, matchesAnyGlob, normalizeUrl, urlPattern } from "../src/core/urls.js";
 
 describe("urls", () => {
@@ -39,37 +49,93 @@ describe("urls", () => {
   });
 });
 
-describe("job", () => {
+describe("page list", () => {
+  const collect = () => {
+    const warnings: string[] = [];
+    return { warnings, warn: (m: string) => warnings.push(m) };
+  };
+  const list = (raw: Record<string, unknown>) => parsePageList(raw, "t.pages.yaml", () => {});
+
   it("expands the matrix", () => {
     expect(variants().map((v) => v.id)).toEqual(["capture"]);
-    expect(variants({ viewport: ["1440x900", "390x844m"], theme: ["light", "dark"] }).map((v) => v.id)).toEqual([
-      "1440x900.light",
-      "1440x900.dark",
-      "390x844m.light",
-      "390x844m.dark",
-    ]);
-    expect(variants({ dpr: [1, "2x"] })[1]!.patch).toEqual({ dpr: 2 });
+    const m = list({ pages: [], matrix: { viewport: ["1440x900", "390x844m"], theme: ["light", "dark"], dpr: [1, "2x"] } }).matrix;
+    expect(variants(m).map((v) => v.id).slice(0, 3)).toEqual(["1440x900.light.1x", "1440x900.light.2x", "1440x900.dark.1x"]);
+    expect(variants(m)).toHaveLength(8);
+    expect(variants(m)[1]!.patch).toEqual({ viewport: { width: 1440, height: 900 }, theme: "light", dpr: 2 });
+  });
+
+  it("drops matrix axes a flag sets", () => {
+    const m = list({ pages: [], matrix: { viewport: ["1440x900", "390x844m"], theme: ["light", "dark"] } }).matrix;
+    expect(variants(m, new Set(["theme"])).map((v) => v.id)).toEqual(["1440x900", "390x844m"]);
   });
 
   it("resolves pages against base with unique names", () => {
-    const pages = resolvePages({
-      base: "https://a.com/app/",
-      wait: { delay: 100 },
-      pages: ["./", "users", "/other", { url: "users", wait: { selector: ".x" } }, { url: "gone", skip: true }],
-    });
+    const pages = resolvePages(
+      list({
+        base: "https://a.com/app/",
+        load: { waitFor: "main" },
+        pages: ["./", "users", "/other", { url: "users", load: { timeout: "5s" } }, { url: "gone", skip: true }],
+      }),
+    );
     expect(pages.map((p) => [p.url, p.name])).toEqual([
       ["https://a.com/app/", "index"],
       ["https://a.com/app/users", "users"],
       ["https://a.com/other", "other"],
       ["https://a.com/app/users", "users-2"],
     ]);
-    expect(pages[3]!.wait).toEqual({ delay: 100, selector: ".x" });
+    expect(pages[3]!.load).toEqual({ waitFor: "main", timeout: 5000 });
     expect(pageName("https://a.com/s?q=a b")).toBe("s--q-a-b");
   });
 
-  it("writes an editable job file and toggles skip without losing comments", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "pagestill-job-")), "pages.yaml");
-    writeJobFile(path, {
+  it("filters with --only on path or name", () => {
+    const l = list({ base: "https://a.com/", pages: ["/admin/users", "/admin/roles", "/blog", { url: "/x", name: "special" }] });
+    expect(resolvePages(l, "/admin/**").map((p) => p.name)).toEqual(["admin-users", "admin-roles"]);
+    expect(resolvePages(l, "special").map((p) => p.name)).toEqual(["special"]);
+  });
+
+  it("reads the full format", () => {
+    const l = list({
+      name: "review",
+      preset: "retina, dark",
+      settings: { hide: [".cookie"] },
+      login: "/sso/",
+      concurrency: 2,
+      pages: [{ url: "/s", steps: [{ click: "#b" }, { type: { into: "#q", text: "hi" } }, { wait: "300ms" }, { scroll: "bottom" }] }],
+    });
+    expect(l).toMatchObject({ name: "review", presets: ["retina", "dark"], settings: { hide: [".cookie"] }, login: "/sso/", concurrency: 2 });
+    expect(l.pages[0]!.steps).toEqual([{ click: "#b" }, { type: { into: "#q", text: "hi" } }, { wait: 300 }, { scroll: "bottom" }]);
+  });
+
+  it("converts the pre-0.4 job format, with warnings", () => {
+    const { warn, warnings } = collect();
+    const l = parsePageList(
+      {
+        out: "shots",
+        loginPattern: "/sso/",
+        wait: { until: "load", selector: "main", delay: 500 },
+        settings: { hideSelectors: [".x"] },
+        pages: [{ url: "/a", wait: { selector: ".chart" }, actions: [{ type: { selector: "#q", text: "x" } }] }],
+      },
+      "old.yaml",
+      warn,
+    );
+    expect(l.settings).toEqual({ hide: [".x"], out: "shots", delay: 500 });
+    expect(l.load).toEqual({ until: "load", waitFor: "main" });
+    expect(l.login).toBe("/sso/");
+    expect(l.pages[0]).toMatchObject({ load: { waitFor: ".chart" }, steps: [{ type: { into: "#q", text: "x" } }] });
+    expect(warnings.length).toBeGreaterThanOrEqual(6);
+    expect(warnings.every((w) => w.startsWith("old.yaml"))).toBe(true);
+  });
+
+  it("rejects unknown steps and matrix keys clearly", () => {
+    expect(() => list({ pages: [{ url: "/a", steps: [{ tap: "#b" }] }] })).toThrow(/pages\[0\] steps\[0\]: unknown step "tap"/);
+    expect(() => list({ pages: [], matrix: { format: ["png"] } })).toThrow(/matrix supports viewport, theme and dpr/);
+    expect(() => loadPageList(join(mkdtempSync(join(tmpdir(), "x-")), "missing.pages.yaml"))).toThrow(/Cannot read/);
+  });
+
+  it("writes an editable list and toggles skip without losing comments", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pagestill-list-")), "a.pages.yaml");
+    writePageList(path, {
       header: " Generated by test",
       base: "https://a.com/",
       entries: [
@@ -81,18 +147,42 @@ describe("job", () => {
     const text = readFileSync(path, "utf8");
     expect(text).toContain("# Generated by test");
     expect(text).toContain("# /users/:id — 3 found");
-    expect(loadJob(path).pages).toEqual(["/", "/users/1", { url: "https://b.com/x", skip: true }]);
+    expect(text).toContain("- /users/1 # User 1");
+    expect(loadPageList(path).pages.map((p) => [p.url, p.skip])).toEqual([["/", false], ["/users/1", false], ["https://b.com/x", true]]);
 
     const doc = YAML.parseDocument(text);
     setSkipped(doc, 1, true);
     setSkipped(doc, 2, false);
     const after = doc.toString();
     expect(after).toContain("# /users/:id — 3 found");
-    expect(YAML.parse(after).pages).toEqual(["/", { url: "/users/1", skip: true }, "https://b.com/x"]);
     expect(after).toContain("- url: /users/1 # User 1");
-
+    expect(YAML.parse(after).pages).toEqual(["/", { url: "/users/1", skip: true }, "https://b.com/x"]);
     const back = YAML.parseDocument(after);
     setSkipped(back, 1, false);
     expect(back.toString()).toContain("- /users/1 # User 1");
+  });
+
+  it("appends to an existing list instead of overwriting it", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "pagestill-list-")), "a.pages.yaml");
+    writeFileSync(path, "# mine\nbase: https://a.com/\nmatrix:\n  theme: [dark]\npages:\n  - /one # kept\n");
+    const added = appendToPageList(path, {
+      header: " ignored for existing files",
+      base: "https://a.com/",
+      entries: [{ url: "https://a.com/one" }, { url: "https://a.com/two", note: "Two · reached in-page" }],
+    });
+    expect(added).toBe(1);
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain("# mine");
+    expect(text).toContain("theme: [ dark ]");
+    expect(YAML.parse(text).pages).toEqual(["/one", "/two"]);
+    expect(text).toContain("- /two # Two · reached in-page");
+  });
+});
+
+describe("run checks", () => {
+  it("flags HTTP errors and pages that ended elsewhere", () => {
+    expect(navigationChecks("https://a.com/x", { finalUrl: "https://a.com/x/", status: 200, warnings: [] })).toEqual([]);
+    expect(navigationChecks("https://a.com/x", { finalUrl: "https://a.com/x", status: 404, warnings: [] })).toEqual(["HTTP 404"]);
+    expect(navigationChecks("https://a.com/x", { finalUrl: "https://a.com/", status: 200, warnings: [] })).toEqual(["ended on https://a.com/"]);
   });
 });

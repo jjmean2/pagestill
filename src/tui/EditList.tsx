@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { Box, Text, render, useApp, useInput, useWindowSize } from "ink";
 import { useState } from "react";
 import YAML, { type Document, isMap, isScalar, isSeq } from "yaml";
-import { setSkipped } from "../batch/job.js";
+import { setSkipped } from "../batch/pagelist.js";
 
 interface Row {
   url: string;
@@ -34,7 +34,7 @@ function readRows(doc: Document): Row[] {
   });
 }
 
-function EditJob({ path }: { path: string }) {
+function EditList({ path }: { path: string }) {
   const { exit, suspendTerminal } = useApp();
   const { rows: termRows } = useWindowSize();
   const [doc, setDoc] = useState(() => YAML.parseDocument(readFileSync(path, "utf8")));
@@ -78,8 +78,8 @@ function EditJob({ path }: { path: string }) {
       const members = rows.flatMap((r, i) => (r.groupIndex === row.groupIndex ? [i] : []));
       apply(members, !row.skip);
     }
-    if (input === "a") apply(rows.map((_, i) => i), false);
-    if (input === "n") apply(rows.map((_, i) => i), true);
+    // a: tick everything, or untick everything when all are already ticked
+    if (input === "a") apply(rows.map((_, i) => i), rows.every((r) => !r.skip));
     if (input === "w") save();
     if (input === "E") {
       if (dirty) save();
@@ -134,16 +134,16 @@ function EditJob({ path }: { path: string }) {
         <Text color="green">{message}</Text>
       ) : (
         <Text dimColor>
-          space toggle · g toggle group · a all · n none · w save · E open in $EDITOR · q quit
+          space tick · g group · a all/none · w save · E $EDITOR · q quit
         </Text>
       )}
     </Box>
   );
 }
 
-export async function runEditJob(path: string): Promise<void> {
+export async function runEditList(path: string): Promise<void> {
   if (!process.stdin.isTTY) throw new Error("`pagestill edit` needs a terminal");
   YAML.parseDocument(readFileSync(path, "utf8")); // fail early on unreadable files
-  const app = render(<EditJob path={path} />);
+  const app = render(<EditList path={path} />);
   await app.waitUntilExit();
 }

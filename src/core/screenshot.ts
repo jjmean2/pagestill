@@ -18,16 +18,16 @@ interface Clip {
   height: number;
 }
 
-type ImageSettings = Pick<CaptureSettings, "area" | "selector" | "format" | "quality" | "omitBackground">;
+type ImageSettings = Pick<CaptureSettings, "area" | "element" | "format" | "quality" | "transparent">;
 
 export async function captureImage(cdp: CDPSession, page: Page, s: ImageSettings): Promise<ImageResult> {
-  const transparent = s.omitBackground && s.format !== "jpeg";
+  const transparent = s.transparent && s.format !== "jpeg";
   if (transparent) {
     await cdp.send("Emulation.setDefaultBackgroundColorOverride", { color: { r: 0, g: 0, b: 0, a: 0 } });
   }
   try {
     if (s.area === "viewport") return await finish(await shoot(cdp, s.format, s.quality), s, true);
-    const clip = s.area === "element" ? await elementClip(page, s.selector) : await fullPageClip(cdp);
+    const clip = s.area === "element" ? await elementClip(page, s.element) : await fullPageClip(cdp);
     const dpr = await page.evaluate(() => devicePixelRatio);
     if (clip.height * dpr <= MAX_TILE_DEVICE_PX) return await finish(await shoot(cdp, s.format, s.quality, clip), s, true);
     return await finish(await stitch(cdp, clip, dpr), s, false);
@@ -53,7 +53,7 @@ async function fullPageClip(cdp: CDPSession): Promise<Clip> {
 }
 
 async function elementClip(page: Page, selector: string): Promise<Clip> {
-  if (!selector.trim()) throw new Error('Area is "element" but no selector is set');
+  if (!selector.trim()) throw new Error('Area is "element" but no element selector is set (--element)');
   const rect = await page.evaluate((sel) => {
     const el = document.querySelector(sel);
     if (!el) return null;

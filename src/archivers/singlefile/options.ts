@@ -1,4 +1,4 @@
-import type { HtmlOptions } from "../../core/settings.js";
+import type { HtmlOptions } from "../types.js";
 
 /**
  * Options passed to `singlefile.getPageData()`. Based on single-file-cli's defaults (v2.16),
@@ -10,24 +10,24 @@ export function toSingleFileOptions(o: HtmlOptions, url: string): Record<string,
   return {
     url,
     // content processing
-    blockScripts: !o.keepScripts,
+    blockScripts: !o.scripts,
     blockAudios: true,
     blockVideos: true,
     blockAlternativeImages: true,
     blockStylesheets: false,
-    removeHiddenElements: o.removeHiddenElements,
-    removeUnusedStyles: o.removeUnusedStyles,
-    removeUnusedFonts: o.removeUnusedStyles,
+    removeHiddenElements: o.removeHidden,
+    removeUnusedStyles: o.removeUnusedCss,
+    removeUnusedFonts: o.removeUnusedCss,
     removeAlternativeFonts: true,
     removeAlternativeMedias: true,
     removeAlternativeImages: true,
-    removeNoScriptTags: !o.keepScripts,
-    removeFrames: !o.includeFrames,
-    compressHTML: o.compressHTML,
+    removeNoScriptTags: !o.scripts,
+    removeFrames: !o.frames,
+    compressHTML: o.minify,
     groupDuplicateImages: true,
     maxSizeDuplicateImages: 512 * 1024,
-    maxResourceSizeEnabled: o.maxResourceSizeMB > 0,
-    maxResourceSize: o.maxResourceSizeMB || 10,
+    maxResourceSizeEnabled: o.maxResourceMb > 0,
+    maxResourceSize: o.maxResourceMb || 10,
     // the page is already loaded and possibly scrolled by the user: don't touch it
     loadDeferredContent: false,
     // output

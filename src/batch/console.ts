@@ -23,8 +23,13 @@ export function reportRun(e: RunEvent): void {
       break;
     case "entry": {
       const { entry: x } = e;
-      const mark = x.status === "ok" ? c(32, "✓") : x.status === "skipped" ? c(33, "–") : c(31, "✗");
-      const detail = x.status === "ok" ? c(2, `${(x.durationMs / 1000).toFixed(1)}s`) : c(x.status === "failed" ? 31 : 33, x.error ?? "");
+      const mark = { ok: c(32, "✓"), check: c(33, "?"), skipped: c(33, "–"), failed: c(31, "✗") }[x.status];
+      const detail =
+        x.status === "ok"
+          ? c(2, `${(x.durationMs / 1000).toFixed(1)}s`)
+          : x.status === "check"
+            ? c(33, `check: ${x.checks?.join("; ")}`)
+            : c(x.status === "failed" ? 31 : 33, x.error ?? "");
       if (isTTY) process.stderr.write("\x1b[2K");
       out(`${c(2, `[${e.done}/${e.total}]`)} ${mark} ${x.page} ${c(36, x.variant)} ${detail}`);
       for (const w of x.warnings) out(c(33, `      ! ${w}`));
@@ -35,9 +40,10 @@ export function reportRun(e: RunEvent): void {
       break;
     case "done":
       out(
-        `${e.aborted ? c(33, "Aborted") : c(1, "Done")}: ${c(32, `${e.ok} ok`)}, ${e.failed ? c(31, `${e.failed} failed`) : "0 failed"}, ${e.skipped} skipped`,
+        `${e.aborted ? c(33, "Aborted") : c(1, "Done")}: ${c(32, `${e.ok} ok`)}, ${e.check ? c(33, `${e.check} to check`) : "0 to check"}, ${e.failed ? c(31, `${e.failed} failed`) : "0 failed"}, ${e.skipped} skipped`,
       );
       out(`Gallery: ${show(`${e.runDir}/index.html`)}`);
+      if (e.check) out(c(2, "Pages to check answered with an HTTP error or ended on another URL; see the gallery."));
       if (e.failed || e.skipped) out(c(2, `Retry the rest with: --resume ${show(e.runDir)}`));
       break;
   }

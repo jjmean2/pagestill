@@ -57,6 +57,7 @@ export async function startSite(): Promise<TestSite> {
             `<button id="go" onclick="history.pushState({}, '', '/site/spa/settings'); document.title = 'SPA Settings'; this.textContent = 'moved'">go</button>`,
           ),
         );
+      if (p === "/site/old") return res.writeHead(302, { location: "/site/a" }).end();
       if (p === "/site/login") return html(page("Login", "<form><input name=u></form>"));
       if (p === "/site/logout") return html(page("Bye", ""));
       return res.writeHead(404).end();

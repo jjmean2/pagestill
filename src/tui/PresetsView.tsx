@@ -22,7 +22,7 @@ export function PresetsView({ presets, onLoad, onSaveAs, onDelete, onDone }: Pre
       return;
     }
     if (key.escape || input === "p" || input === "q") return onDone();
-    if (input === "n" || input === "s") return onSaveAs();
+    if (input === "n") return onSaveAs();
     if (!names.length) return;
     if (key.upArrow || input === "k") setCursor((c) => (c - 1 + names.length) % names.length);
     if (key.downArrow || input === "j") setCursor((c) => (c + 1) % names.length);

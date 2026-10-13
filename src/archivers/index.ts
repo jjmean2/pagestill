@@ -1,6 +1,7 @@
 import type { Archiver } from "./types.js";
 
-export type { Archiver, ArchiveContext, ArchiveResult } from "./types.js";
+export type { Archiver, ArchiveContext, ArchiveResult, HtmlOptions } from "./types.js";
+export { htmlOptionsOf } from "./types.js";
 
 /**
  * Archiver registry. Engines are loaded lazily so a heavy engine (SingleFile's bundle is ~1.2MB)

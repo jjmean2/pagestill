@@ -1,12 +1,13 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Page } from "puppeteer-core";
-import { getArchiver } from "../archivers/index.js";
+import { getArchiver, htmlOptionsOf } from "../archivers/index.js";
 import { applyEmulation, clearEmulation, emulationKey, isPassthrough, prepareDom, settle } from "./emulation.js";
 import { renderFilename, uniqueBase } from "./filename.js";
 import { captureImage } from "./screenshot.js";
 import type { BrowserSession } from "./session.js";
 import type { CaptureSettings } from "./settings.js";
+import { workspace } from "./workspace.js";
 
 export interface CapturedFile {
   kind: "image" | "html";
@@ -32,6 +33,10 @@ export interface CaptureOptions {
   keepEmulation?: boolean;
   /** Emulation key already applied on this page, to skip re-applying + settling. */
   appliedEmulation?: string;
+  /** Folder to write into (default: <out>/shots). */
+  dir?: string;
+  /** File name template relative to `dir`, without extension (default: the `name` setting). */
+  name?: string;
   log?: (message: string) => void;
   signal?: AbortSignal;
 }
@@ -47,7 +52,7 @@ export async function capture(
   s: CaptureSettings,
   opts: CaptureOptions = {},
 ): Promise<CaptureResult> {
-  if (!s.image && !s.html) throw new Error("Nothing to capture: both image and HTML outputs are off");
+  if (!s.image && !s.html) throw new Error("Nothing to save: image and HTML are both off");
   const started = Date.now();
   const log = opts.log ?? (() => {});
   const cdp = await session.cdp(page);
@@ -59,23 +64,23 @@ export async function capture(
     await applyEmulation(cdp, s);
     if (emulate) await settle(page, 300);
   }
-  if (s.waitMs > 0) {
-    log(`Waiting ${s.waitMs}ms`);
-    await new Promise((r) => setTimeout(r, s.waitMs));
+  if (s.delay > 0) {
+    log(`Waiting ${s.delay}ms`);
+    await new Promise((r) => setTimeout(r, s.delay));
   }
 
   const url = page.url();
   const title = await page.title().catch(() => "");
   const date = new Date();
-  const outDir = resolve(s.outDir);
+  const outDir = resolve(opts.dir ?? workspace(s.out).shots);
   const files: CapturedFile[] = [];
   const restoreDom = await prepareDom(page, s);
   try {
     let html: string | undefined;
     if (s.html) {
       log("Capturing HTML");
-      const archiver = await getArchiver(s.htmlOptions.archiver);
-      const res = await archiver.archive(page, s.htmlOptions, { log, signal: opts.signal });
+      const archiver = await getArchiver(s.htmlEngine);
+      const res = await archiver.archive(page, htmlOptionsOf(s), { log, signal: opts.signal });
       html = res.html;
       warnings.push(...res.warnings);
     }
@@ -86,7 +91,7 @@ export async function capture(
     }
 
     const dpr = await page.evaluate(() => devicePixelRatio).catch(() => undefined);
-    const rel = renderFilename(s.filename, {
+    const rel = renderFilename(opts.name ?? s.name, {
       url,
       title,
       date,
