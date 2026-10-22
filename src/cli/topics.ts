@@ -112,27 +112,4 @@ Comments written by crawl/record (titles, "/users/:id — 480 URLs found",
 "reached in-page") are notes only.
 `;
 
-export const KEYS_TOPIC = `Interactive screen
-
-  ⏎            capture now (what "Save" says: image, HTML or both)
-  t            choose tab · follow the tab in front
-  r            Record: collect pages you visit into a page list (r again to save)
-  u            Auto: capture after every navigation
-  e            all settings
-  p            presets: load, save current as…
-  g            open the workspace folder
-  R            reset to defaults (forget the restored session)
-  ?            this help
-  q            quit
-
-  Settings shown on screen: lowercase cycles, Shift types a value
-    o Save         v V Viewport    d D DPR        m Theme
-    w W Delay      x X Hide        l Lazy load
-    a A Area/element               f F Format/quality
-
-In the browser
-  Alt+Shift+S  capture the tab you're on
-
-Lists and views (same everywhere)
-  ↑ ↓ / j k  move     ← →  change     ⏎  select / edit     esc  back
-`;
+export { keysTopic } from "../tui/keys.js";

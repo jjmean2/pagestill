@@ -3,7 +3,8 @@ import { relative } from "node:path";
 import type { LoginDecision, RunEvent } from "./runner.js";
 
 const isTTY = !!process.stdin.isTTY && !!process.stderr.isTTY;
-const c = (code: number, s: string) => (process.stderr.isTTY ? `\x1b[${code}m${s}\x1b[0m` : s);
+const color = process.stderr.isTTY && !process.env.NO_COLOR && process.env.TERM !== "dumb";
+const c = (code: number, s: string) => (color ? `\x1b[${code}m${s}\x1b[0m` : s);
 const out = (s: string) => process.stderr.write(`${s}\n`);
 /** Relative to cwd when inside it, absolute otherwise. */
 const show = (p: string) => {

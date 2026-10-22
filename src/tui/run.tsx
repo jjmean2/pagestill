@@ -26,9 +26,14 @@ export async function runTui({ config, presets, flags, connect, version }: RunTu
   process.stderr.write("Connecting to Chrome…\n");
   const session = await connect();
   let latest: SettingsPatch = restored;
+  let current = session;
   const app = render(
     <App
       session={session}
+      reconnect={async () => {
+        current = await connect();
+        return current;
+      }}
       config={config}
       version={version}
       base={base}
@@ -37,12 +42,14 @@ export async function runTui({ config, presets, flags, connect, version }: RunTu
       presetLabel={presets.length ? presets.join(",") : undefined}
       onSession={(p) => (latest = p)}
     />,
+    // Full screen like lazygit or htop; the terminal's own screen comes back on exit.
+    { alternateScreen: true },
   );
   try {
     await app.waitUntilExit();
   } finally {
     // Detaching our CDP sessions also drops any emulation still applied to the user's tabs.
-    await session.disconnect().catch(() => {});
+    await current.disconnect().catch(() => {});
     saveTuiState(latest);
   }
 }

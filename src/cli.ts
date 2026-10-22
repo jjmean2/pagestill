@@ -1,3 +1,7 @@
+// NO_COLOR (no-color.org): the color library used by the interactive screen only checks
+// FORCE_COLOR, and reads it when first imported, so set it before anything loads it.
+if (process.env.NO_COLOR && process.env.FORCE_COLOR === undefined) process.env.FORCE_COLOR = "0";
+
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join, relative } from "node:path";
@@ -10,7 +14,7 @@ import {
   connectOptions,
   settingsFromFlags,
 } from "./cli/options.js";
-import { KEYS_TOPIC, LISTS_TOPIC, settingsTopic } from "./cli/topics.js";
+import { LISTS_TOPIC, keysTopic, settingsTopic } from "./cli/topics.js";
 import { capture } from "./core/capture.js";
 import { CONFIG_PATH, type Config, loadConfig, presetNames, resolveSettings } from "./core/config.js";
 import { applyEmulation, emulationKey } from "./core/emulation.js";
@@ -404,7 +408,7 @@ program
     const topics: Record<string, () => string> = {
       settings: settingsTopic,
       lists: () => LISTS_TOPIC,
-      keys: () => KEYS_TOPIC,
+      keys: keysTopic,
     };
     if (!topic) return program.help();
     if (topics[topic]) return void process.stdout.write(topics[topic]!());

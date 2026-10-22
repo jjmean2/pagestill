@@ -317,7 +317,8 @@ export const SETTINGS: SettingDef[] = [
     normalize: bool,
     show: onOff,
     cycle: [false, true],
-    key1: "l",
+    // uppercase: a less frequent toggle (l opens the log)
+    key1: "L",
     legacy: ["loadLazy"],
   }),
   def({ key: "freezeAnimations", group: "Prepare", label: "Freeze animations", description: "pause CSS animations and transitions", normalize: bool, show: onOff }),
