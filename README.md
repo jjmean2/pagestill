@@ -50,27 +50,39 @@ Shot and Auto capture the live state, including things only clicking gets you to
 ## The interactive screen
 
 ```
- pagestill 0.4.0 · Chrome (pagestill) · following the tab in front      ? help
- ─────────────────────────────────────────────────────────────────────────────
- Users – Acme Admin
- https://admin.acme.com/users?page=2
- ─────────────────────────────────────────────────────────────────────────────
- SAVE      o image + HTML                              MODES   r Record off
- EMULATE   v 1440×900   d 2x   m dark                          u Auto off
- PREPARE   w 500ms   x .cookie-banner   l lazy load off
- IMAGE     a full page   f png
- preset: retina (changed)   ·   restored last session · R reset
- ─────────────────────────────────────────────────────────────────────────────
- RECENT → pagestill-out/shots/
-   ✓ 20261014-142011_admin-acme-com_users.png 2880×9970 3.1MB · .html 841KB
- ─────────────────────────────────────────────────────────────────────────────
-   ⏎ capture   t tab   r record   u auto   e settings   p presets   g folder   q quit
+ pagestill 0.5.0 · Chrome ● pagestill :9222 · Capture                      ● REC 2   ? help  q quit
+╭─ Tab ──────────────────────────────────────────────────────────────────────────────── following ─╮
+│ Users – Acme Admin                                                                               │
+│ https://admin.acme.com/users?page=2                                                              │
+│ ! Chrome shows 390×844 mobile · 3x · dark (applied live)                                 R reset │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Capture settings ───────── mobile-dark (edited) · 5 changed ─╮╭─ Output ────────────────────────╮
+│ Save      [o] image + HTML     Delay     [w] 500ms •          ││ pagestill-out/shots/            │
+│ Viewport  [v] 390×844 mobile • Hide      [x] .cookie-banner • ││ next 20261023-142011_admin-acme │
+│ DPR       [d] 3x •             Lazy load [L] off              ││      -com_users.png + .html     │
+│ Theme     [m] dark •           Area      [a] full page        ││ 12 saved · 38MB        [g] open │
+│                                Format    [f] png              ││                                 │
+╰───────────────────────────────────────────────────────────────╯╰─────────────────────────────────╯
+╭─ Recording ──────────────────────────────────────────────────────── ● 2 pages · r stop and save ─╮
+│  1 /dashboard                       Dashboard – Acme Admin                                       │
+│  2 /users?page=2                    Users – Acme Admin                                           │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Log ────────────────────────────────────────────────────────────────── 24 entries · l full log ─╮
+│ 14:19:41 ! Chrome now shows 390×844 mobile · 3x · dark                                           │
+│ 14:20:11 ✓ 20261023-142011_admin-acme-com_users.png 1170×7593 3.1MB · .html 841KB          2.0s │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ ⏎ capture  e settings  t tab  p presets  r save recording  u auto  l log  g folder
 ```
 
-- Lowercase keys cycle a setting, **Shift** types a value: `v`/`V` viewport, `d`/`D` DPR, `w`/`W` delay, `x`/`X` elements to hide, `a`/`A` area/element, `f`/`F` format/quality, `m` theme, `l` lazy load, `o` what to save.
-- `e` shows every setting, `p` loads or saves presets, `?` lists all keys (`pagestill help keys`).
-- Viewport, DPR and theme are **applied live** to the tab, so the browser shows what will be captured.
-- The screen remembers your last session (only what you changed there, never command-line flags); `R` resets. Nothing else reads that memory: `shot` and `run` behave the same however you left the screen.
+It runs full screen and gives the terminal back when you quit. From top to bottom: **what** is captured (the tab, and anything pagestill is showing in Chrome right now), **how** (settings, `•` marks what differs from your defaults), **where** files go, and **what happened** (the log, with the newest at the bottom).
+
+- Lowercase keys cycle a setting; uppercase types a value: `v`/`V` viewport, `d`/`D` DPR, `w`/`W` delay, `x`/`X` elements to hide, `a`/`A` area/element, `f`/`F` format/quality, `m` theme, `o` what to save. `L` toggles lazy load.
+- Pages: `e` every setting (with what each one means, its flag and YAML key), `t` tabs, `p` presets (shows what loading one would change), `l` the full log (open or reveal a capture), `?` all keys. `esc` goes back.
+- `r` starts recording; pressing it again opens **Save recording**, where you pick pages and save them to a new list or add them to your latest one.
+- Viewport, DPR and theme are **applied live** to the tab, so the browser shows what will be captured. `R` resets your changes.
+- The screen remembers your last session (only what you changed there, never command-line flags). Nothing else reads that memory: `shot` and `run` behave the same however you left the screen.
+- If Chrome goes away, the screen stays: press ⏎ to reconnect; your settings and recorded pages are kept. Quitting with unsaved recorded pages asks first.
+- Needs at least 60×18. On narrow terminals the panels stack; `NO_COLOR` is respected.
 
 ## One-shot CLI
 
@@ -212,6 +224,10 @@ Behavior changes:
 - `-o` always means the workspace folder. Shots go to `<out>/shots/`, runs to `<out>/runs/`, crawled lists to `<out>/lists/`.
 - `shot` no longer picks up the interactive screen's last settings. Put settings you always want in `defaults:` in `config.yaml`. The 0.3 `settings:` key there is treated as the screen's last session and moved to `tui-state.yaml`.
 - The interactive screen's `s`/`h` (capture image only / HTML only) are gone: choose what to save with `o`, capture with `⏎`. The folder key moved from `O` to `g`.
+
+## Upgrading from 0.4
+
+- The interactive screen is redrawn as titled panels and runs full screen. `l` now opens the log; lazy load moved to `L`. Stopping a recording opens a page where you pick what to save instead of asking for a file name.
 
 ## Security notes
 
