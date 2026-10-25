@@ -59,7 +59,20 @@ const PAGE_INIT = `(() => {
   globalThis.${READY} = true;
 })();`;
 
-const CAPTURE_FN = `async (options, setName, chunkSize) => {
+/**
+ * Runs before the bundle. Pages served with `require-trusted-types-for 'script'` (Gemini, Gmail…)
+ * make SingleFile's DOMParser/innerHTML calls throw; CDP-created worlds inherit the document's CSP.
+ * A pass-through default policy in this world lets plain strings through.
+ */
+const TRUSTED_TYPES_INIT = `(() => {
+  const tt = globalThis.trustedTypes;
+  if (!tt || tt.defaultPolicy) return;
+  try {
+    tt.createPolicy("default", { createHTML: (s) => s, createScript: (s) => s, createScriptURL: (s) => s });
+  } catch {}
+})();`;
+
+const CAPTURE_FN =`async (options, setName, chunkSize) => {
   const data = await globalThis.singlefile.getPageData(options);
   const json = JSON.stringify({ content: data.content, title: data.title });
   for (let i = 0; i < json.length; i += chunkSize) globalThis[setName](json.slice(i, i + chunkSize));
@@ -69,7 +82,7 @@ const CAPTURE_FN = `async (options, setName, chunkSize) => {
 let bundlePromise: Promise<{ main: string; hook: string }> | undefined;
 function loadBundle() {
   bundlePromise ??= import("single-file-cli/lib/single-file-bundle.js").then((b) => ({
-    main: `${b.script}\n${PAGE_INIT}`,
+    main: `${TRUSTED_TYPES_INIT}\n${b.script}\n${PAGE_INIT}`,
     hook: b.hookScript,
   }));
   return bundlePromise;

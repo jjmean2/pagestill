@@ -110,4 +110,16 @@ describe.skipIf(!chrome)("capture against a real Chrome", () => {
     expect(res.files[0]).toMatchObject({ width: 800, height: 600 });
     expect(res.files[0]!.path.endsWith(".jpg")).toBe(true);
   }, 60_000);
+
+  it("archives a page that enforces Trusted Types", async () => {
+    const page = session.active!;
+    await page.goto(`${base}trusted-types`, { waitUntil: "networkidle0" });
+    const s = mergeSettings(DEFAULT_SETTINGS, { image: false, out: join(tmp, "out") });
+    const res = await capture(session, page, s);
+    const html = readFileSync(res.files[0]!.path, "utf8");
+    expect(html).toContain("guarded content");
+    expect(html).toContain("data:image/svg+xml");
+    // the page's own Trusted Types enforcement is untouched
+    expect(await page.evaluate(() => { try { document.body.innerHTML = "<i>x</i>"; return "allowed"; } catch { return "blocked"; } })).toBe("blocked");
+  }, 60_000);
 });

@@ -27,6 +27,10 @@ export async function startSite(): Promise<TestSite> {
     const url = new URL(req.url ?? "/", "http://x");
     hits.set(url.pathname, (hits.get(url.pathname) ?? 0) + 1);
     const html = (body: string) => res.writeHead(200, { "content-type": "text/html" }).end(body);
+    if (url.pathname === "/trusted-types")
+      return res
+        .writeHead(200, { "content-type": "text/html", "content-security-policy": "require-trusted-types-for 'script'" })
+        .end(page("Trusted Types", `<p>guarded content</p><img src="/dot.svg">`));
     if (url.pathname.startsWith("/site")) {
       const p = url.pathname;
       const authed = /(?:^|;\s*)auth=1/.test(req.headers.cookie ?? "");
